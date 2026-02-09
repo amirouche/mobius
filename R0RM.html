@@ -1,0 +1,1768 @@
+<h1 id="r0rm-revised0-report-on-möbius">R0RM — Revised0 Report on
+Möbius</h1>
+<p><em>Draft 4 — February 2026</em></p>
+<h2 id="executive-summary">0. Executive Summary</h2>
+<ul>
+<li>Möbius is a Lisp inspired from Scheme. It is the computational core
+of the Möbius infrastructure: content-addressed, multilingual,
+authorship-preserving.</li>
+<li>One observation: computation is tree transformation. One data
+constructor: <code>cons</code>. One mechanism: <code>gamma</code>.</li>
+<li>Eight value categories: atoms (integer, float, character, string),
+pairs, empty list, booleans, capsules, combiners, boxes,
+continuations.</li>
+<li>Three surface syntaxes — round (S-expressions, prefix), curly
+(braces, infix), spacy (indentation, infix) — all producing identical
+content-addressed trees.</li>
+<li>Pattern syntax is universal across all three surfaces:
+<code>,x</code> binds, <code>,(x)</code> recurses,
+<code>(? pred ,x)</code> guards. No bare identifiers in patterns.</li>
+<li>Top-level definitions are immutable and content-addressed. Boxes
+(mutable indirection) exist only at runtime inside nested scope.</li>
+<li>Types are predicates. No type declarations. No inheritance.
+Classification is external and open.</li>
+<li>No quote, no quasiquote. All data construction through
+<code>cons</code> and the <code>list</code> library function. All
+surfaces produce identical hashes. Anonymous combiners (inline
+<code>gamma</code> or <code>lambda</code> as arguments) are forbidden in
+all surfaces — every combiner must be named via
+<code>define</code>.</li>
+<li><strong>Foundations</strong> (~34 names) are forms and combiners
+that require the evaluator or runtime — they cannot be written in
+Möbius. Some have equivalent expansions in terms of others; these are
+semantic facts the compiler may exploit, not a hierarchy.</li>
+<li><strong>Base library</strong> combiners are Möbius programs shipped
+with the system — they have content hashes and live in the store. Any
+programmer could write them.</li>
+<li>Economy (Hsu, 2019): the ratio of domain-specific names to total
+names measures how much knowledge scales to a broad set of problems.
+Möbius minimizes the denominator.</li>
+<li>The “0” in R0RM: this is the revision before revision, the seed
+before the tree.</li>
+</ul>
+<h2 id="content-model">1. Content Model</h2>
+<p>Möbius separates <strong>content</strong> (immutable,
+content-addressed) from <strong>naming</strong> (mutable,
+versioned).</p>
+<h3 id="the-content-store">1.1 The content store</h3>
+<p>The content store is an immutable mapping from hashes to trees.</p>
+<pre><code>store : Hash → Tree</code></pre>
+<p>Every distinct tree has a unique hash, computed from its structure —
+atoms, pairs, and references to other hashes. Once stored, a tree cannot
+be changed. Its hash is its identity.</p>
+<h3 id="the-registry">1.2 The registry</h3>
+<p>The registry is a mutable, versioned mapping from names to
+hashes.</p>
+<pre><code>registry : Name → Hash</code></pre>
+<p>Names are strings in a natural language. The same hash may have
+different names in different languages:</p>
+<pre><code>&quot;odd?&quot;  → 0x7a3f...
+&quot;impair?&quot; → 0x7a3f...
+&quot;فردي؟&quot;  → 0x7a3f...</code></pre>
+<p>The registry is the <strong>image</strong> — the living, evolving
+view into the content store. Updating a name to point to a new hash does
+not change the old tree; it creates a new version of the registry.</p>
+<h3 id="registration">1.3 Registration</h3>
+<p>Registration converts surface syntax into content-addressed form:</p>
+<ol type="1">
+<li><strong>Parse</strong> surface syntax into an AST with names.</li>
+<li><strong>Resolve</strong> each name against the current registry,
+obtaining a hash.</li>
+<li><strong>Replace</strong> names with hashes, producing a tree of
+atoms, pairs, and hash references.</li>
+<li><strong>Compute</strong> the hash of the resulting tree.</li>
+<li><strong>Store</strong> the tree in the content store (if not already
+present).</li>
+<li><strong>Bind</strong> the name to the hash in the registry.</li>
+</ol>
+<p>After registration, the original names are gone from the content.
+Only hashes remain.</p>
+<p>The registrar detects mutually recursive top-level definitions and
+bundles them into a single content-addressed unit. The dependency DAG is
+between these units, not between individual definitions (§7.3).</p>
+<p>Note: the reader and the registration pipeline may internally
+represent names as symbols. Symbols are an implementation detail of the
+toolchain, not a user-visible value type. The constraint “no symbols as
+values” applies to the content store and to runtime, not to intermediate
+representations.</p>
+<h3 id="combiner-structure">1.4 Combiner structure</h3>
+<p>A combiner in the content store is a tree containing:</p>
+<ul>
+<li><strong>Atoms</strong>: integers, floats, characters, strings,
+128-bit type identifiers — self-hashing.</li>
+<li><strong>Pairs</strong>: structure — hash is computed from the hashes
+of car and cdr.</li>
+<li><strong>Hash references</strong>: pointers to other content
+(foundations, constants, other combiners).</li>
+<li><strong>Bound variables</strong>: positions introduced by patterns
+and used within the same combiner.</li>
+</ul>
+<p>Bound variables are local to a combiner and represented by position
+(de Bruijn indices or equivalent), not by name. This ensures that
+alpha-equivalent combiners hash to the same value.</p>
+<h3 id="foundations">1.5 Foundations</h3>
+<p>Foundations are forms and combiners built into the runtime with
+reserved hashes — integers smaller than 2¹²⁸, known to all
+implementations. Foundations are not stored in the content store — they
+are intrinsic.</p>
+<h2 id="values">2. Values</h2>
+<p>All values in Möbius are trees. There are eight categories:</p>
+<p><strong>Atoms.</strong> An integer, a float, a character, or a
+string.</p>
+<p><strong>Pairs.</strong> Two trees joined by <code>cons</code>. The
+only compositional data constructor. All structures — lists, records,
+tables, matrices — are built from pairs.</p>
+<p><strong>The empty list.</strong> Written <code>#nil</code> in all
+surfaces. <code>(eq? #nil #nil)</code> is <code>#true</code>.</p>
+<p><strong>Booleans.</strong> <code>#true</code> and
+<code>#false</code>. Only <code>#false</code> is false — it is the sole
+value that causes <code>if</code> to take the else branch. Every other
+value, including <code>0</code>, <code>#nil</code>, and the empty
+string, is considered true.</p>
+<p><strong>The void value.</strong> <code>#void</code> is a pre-defined
+singleton. It is the conventional return value of side-effecting
+operations like <code>box!</code> and <code>display</code>.
+<code>#void</code> is true (it is not <code>#false</code>).</p>
+<p><strong>Capsules.</strong> An opaque value tagged with a 128-bit type
+identifier (§9). Two trees with identical structure but wrapped in
+different capsule types are distinct.</p>
+<p><strong>Combiners.</strong> The result of evaluating a
+<code>gamma</code> or <code>lambda</code> expression. A combiner is a
+tree that, when applied, receives a tree and produces a tree.</p>
+<p><strong>Boxes.</strong> A mutable indirection cell created by
+<code>box</code>, read by <code>unbox</code>, mutated by
+<code>box!</code> (§10). Boxes are the only mutable values in Möbius.
+They are forbidden in top-level content-addressed definitions.</p>
+<p><strong>Continuations.</strong> A first-class value representing a
+point of execution, created by <code>call/cc</code> (§12). Continuations
+are runtime-only — they cannot be stored in the content store. They are
+not combiners: you cannot apply them with the application rule. Use
+<code>continuation-apply</code> to deliver a value to a
+continuation.</p>
+<p>There is no distinction between “data” and “code” at the structural
+level. Both are trees.</p>
+<p>There are no symbols as values. Names in source syntax are resolved
+to content hashes at registration time.</p>
+<p>There is no <code>quote</code> and no <code>quasiquote</code>. All
+data construction is explicit, through <code>cons</code> and the
+<code>list</code> library function. This eliminates the question of what
+symbols become when quoted — they don’t exist as values, and there is no
+mechanism that pretends otherwise.</p>
+<h2 id="three-surfaces">3. Three Surfaces</h2>
+<p>Möbius has three surface syntaxes. All three produce identical
+content-addressed trees. The surface is a view; the content is the
+truth.</p>
+<h3 id="surface-declaration">3.1 Surface declaration</h3>
+<p>A Möbius source file uses the extension <code>.mobius</code> and
+begins with a surface declaration:</p>
+<pre><code>#lang round
+#lang curly
+#lang spacy</code></pre>
+<p>If absent, behavior is implementation-defined. The surface can also
+be selected via command-line flag: <code>--surface=round</code>,
+<code>--surface=curly</code>, <code>--surface=spacy</code>.</p>
+<h3 id="round-surface">3.2 Round surface</h3>
+<p>Round is the S-expression surface. Prefix notation. Parentheses
+delimit everything.</p>
+<div class="sourceCode" id="cb5"><pre
+class="sourceCode scheme"><code class="sourceCode scheme"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a>#lang <span class="kw">round</span></span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a><span class="co">;; constants</span></span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a>(<span class="ex">define</span><span class="fu"> pi </span><span class="fl">3.14</span>)</span>
+<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a><span class="co">;; combiners with lambda</span></span>
+<span id="cb5-7"><a href="#cb5-7" aria-hidden="true" tabindex="-1"></a>(<span class="ex">define</span><span class="fu"> double </span>(<span class="kw">lambda</span> (x) (<span class="op">*</span> x <span class="dv">2</span>)))</span>
+<span id="cb5-8"><a href="#cb5-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-9"><a href="#cb5-9" aria-hidden="true" tabindex="-1"></a><span class="co">;; combiners with gamma</span></span>
+<span id="cb5-10"><a href="#cb5-10" aria-hidden="true" tabindex="-1"></a>(<span class="ex">define</span><span class="fu"> sum </span>(gamma ((,head <span class="op">.</span> ,(tail)) (<span class="op">+</span> head tail))</span>
+<span id="cb5-11"><a href="#cb5-11" aria-hidden="true" tabindex="-1"></a>                   (#nil               <span class="dv">0</span>)))</span>
+<span id="cb5-12"><a href="#cb5-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-13"><a href="#cb5-13" aria-hidden="true" tabindex="-1"></a><span class="co">;; application</span></span>
+<span id="cb5-14"><a href="#cb5-14" aria-hidden="true" tabindex="-1"></a>(sum (<span class="kw">list</span> <span class="dv">1</span> <span class="dv">2</span> <span class="dv">3</span>))</span>
+<span id="cb5-15"><a href="#cb5-15" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-16"><a href="#cb5-16" aria-hidden="true" tabindex="-1"></a><span class="co">;; conditional</span></span>
+<span id="cb5-17"><a href="#cb5-17" aria-hidden="true" tabindex="-1"></a>(<span class="kw">if</span> (<span class="op">&gt;</span> x <span class="dv">0</span>) (<span class="op">+</span> x <span class="dv">1</span>) (<span class="op">-</span> x <span class="dv">1</span>))</span>
+<span id="cb5-18"><a href="#cb5-18" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-19"><a href="#cb5-19" aria-hidden="true" tabindex="-1"></a><span class="co">;; sequencing</span></span>
+<span id="cb5-20"><a href="#cb5-20" aria-hidden="true" tabindex="-1"></a>(<span class="kw">begin</span> (<span class="kw">display</span> <span class="st">&quot;hello&quot;</span>) (<span class="kw">display</span> <span class="st">&quot;world&quot;</span>) <span class="dv">42</span>)</span>
+<span id="cb5-21"><a href="#cb5-21" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-22"><a href="#cb5-22" aria-hidden="true" tabindex="-1"></a><span class="co">;; list construction</span></span>
+<span id="cb5-23"><a href="#cb5-23" aria-hidden="true" tabindex="-1"></a>(<span class="kw">list</span> <span class="dv">1</span> <span class="dv">2</span> <span class="dv">3</span>)             <span class="co">;; =&gt; (1 . (2 . (3 . #nil)))</span></span>
+<span id="cb5-24"><a href="#cb5-24" aria-hidden="true" tabindex="-1"></a>(<span class="kw">cons</span> <span class="dv">1</span> (<span class="kw">cons</span> <span class="dv">2</span> #nil))   <span class="co">;; =&gt; (1 . (2 . #nil))</span></span></code></pre></div>
+<p>Comments: <code>;</code> for line comments, <code>#;</code> for datum
+comments.</p>
+<p><strong>No anonymous combiners as arguments.</strong> Every
+<code>gamma</code> or <code>lambda</code> must be bound to a name via
+<code>define</code>. This ensures surface equivalence — any program
+written in round can be identically expressed in curly and spacy.</p>
+<div class="sourceCode" id="cb6"><pre
+class="sourceCode scheme"><code class="sourceCode scheme"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="co">;; WRONG — anonymous combiner as argument</span></span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a>(map (<span class="kw">lambda</span> (x) (<span class="op">*</span> x <span class="dv">2</span>)) my-list)</span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a><span class="co">;; CORRECT — named combiner</span></span>
+<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a>(<span class="ex">define</span><span class="fu"> double </span>(<span class="kw">lambda</span> (x) (<span class="op">*</span> x <span class="dv">2</span>)))</span>
+<span id="cb6-6"><a href="#cb6-6" aria-hidden="true" tabindex="-1"></a>(map double my-list)</span></code></pre></div>
+<h3 id="curly-surface">3.3 Curly surface</h3>
+<p>Curly uses braces and semicolons. Infix arithmetic with mandatory
+full parenthesization.</p>
+<div class="sourceCode" id="cb7"><pre
+class="sourceCode javascript"><code class="sourceCode javascript"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a>#lang curly</span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a><span class="op">;;</span> constants</span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a>define pi <span class="fl">3.14</span><span class="op">;</span></span>
+<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-6"><a href="#cb7-6" aria-hidden="true" tabindex="-1"></a><span class="op">;;</span> combiners <span class="cf">with</span> lambda</span>
+<span id="cb7-7"><a href="#cb7-7" aria-hidden="true" tabindex="-1"></a>define double <span class="fu">lambda</span> (x) { (x <span class="op">*</span> <span class="dv">2</span>) }<span class="op">;</span></span>
+<span id="cb7-8"><a href="#cb7-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-9"><a href="#cb7-9" aria-hidden="true" tabindex="-1"></a><span class="op">;;</span> combiners <span class="cf">with</span> gamma</span>
+<span id="cb7-10"><a href="#cb7-10" aria-hidden="true" tabindex="-1"></a>define sum gamma {</span>
+<span id="cb7-11"><a href="#cb7-11" aria-hidden="true" tabindex="-1"></a>    <span class="cf">case</span> (<span class="op">,</span>head <span class="op">.</span> <span class="op">,</span>(tail))<span class="op">:</span> (head <span class="op">+</span> tail)<span class="op">;</span></span>
+<span id="cb7-12"><a href="#cb7-12" aria-hidden="true" tabindex="-1"></a>    <span class="cf">case</span> #<span class="dt">nil</span><span class="op">:</span> <span class="dv">0</span><span class="op">;</span></span>
+<span id="cb7-13"><a href="#cb7-13" aria-hidden="true" tabindex="-1"></a>}<span class="op">;</span></span>
+<span id="cb7-14"><a href="#cb7-14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-15"><a href="#cb7-15" aria-hidden="true" tabindex="-1"></a><span class="op">;;</span> application — space<span class="op">-</span>separated <span class="kw">arguments</span><span class="op">,</span> no commas</span>
+<span id="cb7-16"><a href="#cb7-16" aria-hidden="true" tabindex="-1"></a><span class="fu">sum</span>(<span class="fu">list</span>(<span class="dv">1</span> <span class="dv">2</span> <span class="dv">3</span>))<span class="op">;</span></span>
+<span id="cb7-17"><a href="#cb7-17" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-18"><a href="#cb7-18" aria-hidden="true" tabindex="-1"></a><span class="op">;;</span> conditional</span>
+<span id="cb7-19"><a href="#cb7-19" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> (x <span class="op">&gt;</span> <span class="dv">0</span>) { (x <span class="op">+</span> <span class="dv">1</span>) } <span class="cf">else</span> { (x <span class="op">-</span> <span class="dv">1</span>) }<span class="op">;</span></span>
+<span id="cb7-20"><a href="#cb7-20" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-21"><a href="#cb7-21" aria-hidden="true" tabindex="-1"></a><span class="op">;;</span> sequencing — braces <span class="op">+</span> semicolons</span>
+<span id="cb7-22"><a href="#cb7-22" aria-hidden="true" tabindex="-1"></a>{</span>
+<span id="cb7-23"><a href="#cb7-23" aria-hidden="true" tabindex="-1"></a>    <span class="fu">display</span>(<span class="st">&quot;hello&quot;</span>)<span class="op">;</span></span>
+<span id="cb7-24"><a href="#cb7-24" aria-hidden="true" tabindex="-1"></a>    <span class="fu">display</span>(<span class="st">&quot;world&quot;</span>)<span class="op">;</span></span>
+<span id="cb7-25"><a href="#cb7-25" aria-hidden="true" tabindex="-1"></a>    <span class="dv">42</span></span>
+<span id="cb7-26"><a href="#cb7-26" aria-hidden="true" tabindex="-1"></a>}<span class="op">;</span></span>
+<span id="cb7-27"><a href="#cb7-27" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-28"><a href="#cb7-28" aria-hidden="true" tabindex="-1"></a><span class="op">;;</span> multi<span class="op">-</span>expression <span class="cf">case</span> bodies</span>
+<span id="cb7-29"><a href="#cb7-29" aria-hidden="true" tabindex="-1"></a>define foo gamma {</span>
+<span id="cb7-30"><a href="#cb7-30" aria-hidden="true" tabindex="-1"></a>    <span class="cf">case</span> (<span class="op">,</span>x <span class="op">,</span>y)<span class="op">:</span> {</span>
+<span id="cb7-31"><a href="#cb7-31" aria-hidden="true" tabindex="-1"></a>        define <span class="fu">z</span> (x <span class="op">+</span> y)<span class="op">;</span></span>
+<span id="cb7-32"><a href="#cb7-32" aria-hidden="true" tabindex="-1"></a>        define <span class="fu">w</span> (z <span class="op">*</span> <span class="dv">2</span>)<span class="op">;</span></span>
+<span id="cb7-33"><a href="#cb7-33" aria-hidden="true" tabindex="-1"></a>        w</span>
+<span id="cb7-34"><a href="#cb7-34" aria-hidden="true" tabindex="-1"></a>    }<span class="op">;</span></span>
+<span id="cb7-35"><a href="#cb7-35" aria-hidden="true" tabindex="-1"></a>    <span class="cf">case</span> #<span class="dt">nil</span><span class="op">:</span> <span class="dv">0</span><span class="op">;</span></span>
+<span id="cb7-36"><a href="#cb7-36" aria-hidden="true" tabindex="-1"></a>}<span class="op">;</span></span></code></pre></div>
+<p>Arguments are space-separated. Comma is reserved for pattern syntax
+(<code>,x</code>, <code>,(x)</code>). The expression <code>f(3 4)</code>
+passes the tree <code>(3 . (4 . #nil))</code> to <code>f</code>.</p>
+<p>Infix rule: <code>(1 + 2)</code> is valid. <code>1 + 2 * 3</code>
+without parentheses is a <strong>reader error</strong>. The programmer
+must write <code>(1 + (2 * 3))</code> or <code>((1 + 2) * 3)</code>
+explicitly. There is no precedence. The reader translates
+<code>(a + b)</code> to the same tree as round’s
+<code>(+ a b)</code>.</p>
+<p>Semicolons separate statements. The last expression in a brace block
+is the return value.</p>
+<p><strong>No anonymous combiners as arguments.</strong> Same rule as
+round — every <code>gamma</code> or <code>lambda</code> must be
+named.</p>
+<h3 id="spacy-surface">3.4 Spacy surface</h3>
+<p>Spacy uses indentation and colons. Infix arithmetic with mandatory
+full parenthesization.</p>
+<div class="sourceCode" id="cb8"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="co">#lang spacy</span></span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a><span class="op">;;</span> constants</span>
+<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a>define pi: <span class="fl">3.14</span></span>
+<span id="cb8-5"><a href="#cb8-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb8-6"><a href="#cb8-6" aria-hidden="true" tabindex="-1"></a><span class="op">;;</span> combiners <span class="cf">with</span> <span class="kw">lambda</span></span>
+<span id="cb8-7"><a href="#cb8-7" aria-hidden="true" tabindex="-1"></a>define double: <span class="kw">lambda</span> (x): (x <span class="op">*</span> <span class="dv">2</span>)</span>
+<span id="cb8-8"><a href="#cb8-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb8-9"><a href="#cb8-9" aria-hidden="true" tabindex="-1"></a><span class="op">;;</span> combiners <span class="cf">with</span> gamma</span>
+<span id="cb8-10"><a href="#cb8-10" aria-hidden="true" tabindex="-1"></a>define <span class="bu">sum</span>: gamma:</span>
+<span id="cb8-11"><a href="#cb8-11" aria-hidden="true" tabindex="-1"></a>    case (,head . ,(tail)): (head <span class="op">+</span> tail)</span>
+<span id="cb8-12"><a href="#cb8-12" aria-hidden="true" tabindex="-1"></a>    case <span class="co">#nil: 0</span></span>
+<span id="cb8-13"><a href="#cb8-13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb8-14"><a href="#cb8-14" aria-hidden="true" tabindex="-1"></a><span class="op">;;</span> application — space<span class="op">-</span>separated arguments</span>
+<span id="cb8-15"><a href="#cb8-15" aria-hidden="true" tabindex="-1"></a><span class="bu">sum</span>(<span class="bu">list</span>(<span class="dv">1</span> <span class="dv">2</span> <span class="dv">3</span>))</span>
+<span id="cb8-16"><a href="#cb8-16" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb8-17"><a href="#cb8-17" aria-hidden="true" tabindex="-1"></a><span class="op">;;</span> conditional</span>
+<span id="cb8-18"><a href="#cb8-18" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> (x <span class="op">&gt;</span> <span class="dv">0</span>):</span>
+<span id="cb8-19"><a href="#cb8-19" aria-hidden="true" tabindex="-1"></a>    (x <span class="op">+</span> <span class="dv">1</span>)</span>
+<span id="cb8-20"><a href="#cb8-20" aria-hidden="true" tabindex="-1"></a><span class="cf">else</span>:</span>
+<span id="cb8-21"><a href="#cb8-21" aria-hidden="true" tabindex="-1"></a>    (x <span class="op">-</span> <span class="dv">1</span>)</span>
+<span id="cb8-22"><a href="#cb8-22" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb8-23"><a href="#cb8-23" aria-hidden="true" tabindex="-1"></a><span class="op">;;</span> sequencing — newlines under same indentation</span>
+<span id="cb8-24"><a href="#cb8-24" aria-hidden="true" tabindex="-1"></a>define foo: gamma:</span>
+<span id="cb8-25"><a href="#cb8-25" aria-hidden="true" tabindex="-1"></a>    case (,x ,y):</span>
+<span id="cb8-26"><a href="#cb8-26" aria-hidden="true" tabindex="-1"></a>        define z: (x <span class="op">+</span> y)</span>
+<span id="cb8-27"><a href="#cb8-27" aria-hidden="true" tabindex="-1"></a>        define w: (z <span class="op">*</span> <span class="dv">2</span>)</span>
+<span id="cb8-28"><a href="#cb8-28" aria-hidden="true" tabindex="-1"></a>        w</span>
+<span id="cb8-29"><a href="#cb8-29" aria-hidden="true" tabindex="-1"></a>    case <span class="co">#nil: 0</span></span></code></pre></div>
+<p>The colon is spacy’s “here comes the body” marker. It appears after
+<code>define name</code>, after <code>lambda (params)</code>, after
+<code>gamma</code>, after <code>case pattern</code>, after
+<code>if (cond)</code>, and after <code>else</code>.</p>
+<p>After a colon in inline position, exactly <strong>one
+expression</strong> follows as the body. For multi-expression bodies,
+use a newline and indented block. The last expression in a block is the
+return value.</p>
+<p>Semicolons are permitted as inline statement separators (as in
+Python) but are discouraged.</p>
+<p><strong>No anonymous combiners as arguments.</strong> Same rule as
+round and curly. This is the constraint that motivated the universal ban
+— spacy’s indentation-based scoping cannot delimit inline anonymous
+combiners without ambiguity, so all surfaces share the restriction to
+maintain equivalence.</p>
+<p>The infix rule is the same as curly: mandatory full parenthesization,
+no precedence, reader translates to prefix trees.</p>
+<h3 id="identifier-lexing">3.5 Identifier lexing</h3>
+<p>The same lexer rule applies to all three surfaces:</p>
+<ul>
+<li>An identifier starts with an alphabetical character or one of
+<code>+ - * / &lt; &gt; = ? ! _</code>.</li>
+<li>It continues until <strong>whitespace</strong> or a
+<strong>structural delimiter</strong>: <code>(</code>, <code>)</code>,
+<code>{</code>, <code>}</code>, <code>;</code>, <code>:</code>,
+<code>'</code>, <code>`</code>, <code>"</code>, <code>,</code>.</li>
+</ul>
+<p>This means the full Lisp identifier set is available in all surfaces:
+<code>list-&gt;string</code>, <code>ab-cd</code>, <code>zero?</code>,
+<code>box!</code>, <code>pair-of?</code> are all single tokens
+everywhere.</p>
+<pre><code>;; round
+(list-&gt;string my-list)
+
+;; curly
+list-&gt;string(my-list);
+
+;; spacy
+list-&gt;string(my-list)</code></pre>
+<p>The mandatory parenthesization rule (§6.4) ensures infix expressions
+are unambiguous. Inside <code>(a op b)</code>, three space-separated
+tokens are parsed as infix. Outside of parenthesized infix, identifiers
+like <code>ab-cd</code> are never split — the lexer reads greedily until
+a delimiter.</p>
+<div class="sourceCode" id="cb10"><pre
+class="sourceCode javascript"><code class="sourceCode javascript"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="op">;;</span> curly</span>
+<span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a>(ab<span class="op">-</span>cd <span class="op">+</span> ef<span class="op">-</span>gh)          <span class="op">;;</span> infix<span class="op">:</span> three tokens<span class="op">,</span> <span class="op">+</span> is the operator</span>
+<span id="cb10-3"><a href="#cb10-3" aria-hidden="true" tabindex="-1"></a>ab<span class="op">-</span>cd                    <span class="op">;;</span> one identifier</span>
+<span id="cb10-4"><a href="#cb10-4" aria-hidden="true" tabindex="-1"></a><span class="fu">map</span>(list<span class="op">-&gt;</span>string xs)<span class="op">;</span>    <span class="op">;;</span> application<span class="op">:</span> two <span class="kw">arguments</span></span></code></pre></div>
+<p>No surface restricts the identifier character set. No underscore
+translation. No registry normalization across surfaces.</p>
+<h3 id="argument-separation">3.6 Argument separation</h3>
+<p>All three surfaces use <strong>space</strong> as the argument
+separator. There are no commas between arguments in any surface.</p>
+<pre><code>;; round
+(f 3 4 5)
+
+;; curly
+f(3 4 5);
+
+;; spacy
+f(3 4 5)</code></pre>
+<p>Comma is reserved exclusively for pattern syntax: <code>,x</code>
+(bind), <code>,(x)</code> (catamorphism). This is universal across all
+three surfaces.</p>
+<h3 id="surface-equivalence">3.7 Surface equivalence</h3>
+<p>The following three definitions register the same content hash:</p>
+<pre><code>;; round
+(define add (gamma ((,a ,b) (+ a b))))
+
+;; curly
+define add gamma { case (,a ,b): (a + b) };
+
+;; spacy
+define add: gamma:
+    case (,a ,b): (a + b)</code></pre>
+<p>All three surfaces have identical capabilities. Any program written
+in one surface can be mechanically translated to either of the others.
+The ban on anonymous combiners as arguments is the constraint that makes
+this possible.</p>
+<h3 id="comments">3.8 Comments</h3>
+<p><strong>Round:</strong> <code>;</code> begins a line comment.
+<code>#;</code> is a datum comment — it comments out the next complete
+S-expression.</p>
+<div class="sourceCode" id="cb13"><pre
+class="sourceCode scheme"><code class="sourceCode scheme"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a>(<span class="op">+</span> <span class="dv">1</span> <span class="co">#;(ignored)</span> <span class="dv">2</span>)   <span class="co">;; =&gt; 3</span></span></code></pre></div>
+<p><strong>Curly:</strong> <code>//</code> begins a line comment.
+<code>;</code> is a statement separator and cannot double as a comment
+marker.</p>
+<p><strong>Spacy:</strong> <code>//</code> begins a line comment.</p>
+<p><code>#;</code> datum comments are available in all surfaces.</p>
+<h2 id="gamma">4. Gamma</h2>
+<p><code>gamma</code> is the core foundation of Möbius. It takes a
+sequence of clauses and returns a combiner.</p>
+<h3 id="basic-form">4.1 Basic form</h3>
+<p><strong>Round:</strong></p>
+<div class="sourceCode" id="cb14"><pre
+class="sourceCode scheme"><code class="sourceCode scheme"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a>(gamma (pattern₁ body₁)</span>
+<span id="cb14-2"><a href="#cb14-2" aria-hidden="true" tabindex="-1"></a>       (pattern₂ body₂)</span>
+<span id="cb14-3"><a href="#cb14-3" aria-hidden="true" tabindex="-1"></a>       <span class="op">...</span></span>
+<span id="cb14-4"><a href="#cb14-4" aria-hidden="true" tabindex="-1"></a>       (patternₙ bodyₙ))</span></code></pre></div>
+<p><strong>Curly:</strong></p>
+<div class="sourceCode" id="cb15"><pre
+class="sourceCode javascript"><code class="sourceCode javascript"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a>gamma {</span>
+<span id="cb15-2"><a href="#cb15-2" aria-hidden="true" tabindex="-1"></a>    <span class="cf">case</span> <span class="dt">pattern₁</span><span class="op">:</span> body₁<span class="op">;</span></span>
+<span id="cb15-3"><a href="#cb15-3" aria-hidden="true" tabindex="-1"></a>    <span class="cf">case</span> <span class="dt">pattern₂</span><span class="op">:</span> body₂<span class="op">;</span></span>
+<span id="cb15-4"><a href="#cb15-4" aria-hidden="true" tabindex="-1"></a>    <span class="op">...</span></span>
+<span id="cb15-5"><a href="#cb15-5" aria-hidden="true" tabindex="-1"></a>    <span class="cf">case</span> <span class="dt">patternₙ</span><span class="op">:</span> bodyₙ<span class="op">;</span></span>
+<span id="cb15-6"><a href="#cb15-6" aria-hidden="true" tabindex="-1"></a>}</span></code></pre></div>
+<p><strong>Spacy:</strong></p>
+<div class="sourceCode" id="cb16"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a>gamma:</span>
+<span id="cb16-2"><a href="#cb16-2" aria-hidden="true" tabindex="-1"></a>    <span class="cf">case</span> pattern₁: body₁</span>
+<span id="cb16-3"><a href="#cb16-3" aria-hidden="true" tabindex="-1"></a>    <span class="cf">case</span> pattern₂: body₂</span>
+<span id="cb16-4"><a href="#cb16-4" aria-hidden="true" tabindex="-1"></a>    ...</span>
+<span id="cb16-5"><a href="#cb16-5" aria-hidden="true" tabindex="-1"></a>    <span class="cf">case</span> patternₙ: bodyₙ</span></code></pre></div>
+<p>The resulting combiner accepts a single tree argument, tries each
+pattern in order, and evaluates the body of the first matching
+clause.</p>
+<h3 id="catamorphism">4.2 Catamorphism</h3>
+<p>When a pattern uses <code>,(x)</code>, the enclosing gamma combiner
+is applied to the subtree recursively before binding. The body receives
+already-folded values. The programmer never writes an explicit recursive
+call.</p>
+<p><strong>Round:</strong></p>
+<div class="sourceCode" id="cb17"><pre
+class="sourceCode scheme"><code class="sourceCode scheme"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a>(<span class="ex">define</span><span class="fu"> sum </span>(gamma ((,head <span class="op">.</span> ,(tail)) (<span class="op">+</span> head tail))</span>
+<span id="cb17-2"><a href="#cb17-2" aria-hidden="true" tabindex="-1"></a>                   (#nil               <span class="dv">0</span>)))</span>
+<span id="cb17-3"><a href="#cb17-3" aria-hidden="true" tabindex="-1"></a>(sum (<span class="kw">list</span> <span class="dv">1</span> <span class="dv">2</span> <span class="dv">3</span>))</span>
+<span id="cb17-4"><a href="#cb17-4" aria-hidden="true" tabindex="-1"></a><span class="co">;; =&gt; 6</span></span></code></pre></div>
+<p><strong>Curly:</strong></p>
+<div class="sourceCode" id="cb18"><pre
+class="sourceCode javascript"><code class="sourceCode javascript"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a>define sum gamma {</span>
+<span id="cb18-2"><a href="#cb18-2" aria-hidden="true" tabindex="-1"></a>    <span class="cf">case</span> (<span class="op">,</span>head <span class="op">.</span> <span class="op">,</span>(tail))<span class="op">:</span> (head <span class="op">+</span> tail)<span class="op">;</span></span>
+<span id="cb18-3"><a href="#cb18-3" aria-hidden="true" tabindex="-1"></a>    <span class="cf">case</span> #<span class="dt">nil</span><span class="op">:</span> <span class="dv">0</span><span class="op">;</span></span>
+<span id="cb18-4"><a href="#cb18-4" aria-hidden="true" tabindex="-1"></a>}<span class="op">;</span></span>
+<span id="cb18-5"><a href="#cb18-5" aria-hidden="true" tabindex="-1"></a><span class="fu">sum</span>(<span class="fu">list</span>(<span class="dv">1</span> <span class="dv">2</span> <span class="dv">3</span>))<span class="op">;</span></span>
+<span id="cb18-6"><a href="#cb18-6" aria-hidden="true" tabindex="-1"></a><span class="op">;;</span> <span class="kw">=&gt;</span> <span class="dv">6</span></span></code></pre></div>
+<p><strong>Spacy:</strong></p>
+<div class="sourceCode" id="cb19"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a>define <span class="bu">sum</span>: gamma:</span>
+<span id="cb19-2"><a href="#cb19-2" aria-hidden="true" tabindex="-1"></a>    case (,head . ,(tail)): (head <span class="op">+</span> tail)</span>
+<span id="cb19-3"><a href="#cb19-3" aria-hidden="true" tabindex="-1"></a>    case <span class="co">#nil: 0</span></span>
+<span id="cb19-4"><a href="#cb19-4" aria-hidden="true" tabindex="-1"></a><span class="bu">sum</span>(<span class="bu">list</span>(<span class="dv">1</span> <span class="dv">2</span> <span class="dv">3</span>))</span>
+<span id="cb19-5"><a href="#cb19-5" aria-hidden="true" tabindex="-1"></a><span class="op">;;</span> <span class="op">=&gt;</span> <span class="dv">6</span></span></code></pre></div>
+<p>Here <code>head</code> is bound to the raw car. <code>tail</code> is
+bound to the result of applying <code>sum</code> to the cdr. The fold is
+declared in the pattern, not the body.</p>
+<p>Because recursion is limited to structural sub-parts of the matched
+value, catamorphic match over finite structures always terminates.</p>
+<h2 id="patterns">5. Patterns</h2>
+<p>Patterns describe the shape of a tree and how to bind parts of it.
+Pattern syntax is <strong>identical across all three
+surfaces</strong>.</p>
+<h3 id="pattern-forms">5.1 Pattern forms</h3>
+<p><strong>Literal.</strong> <code>42</code>, <code>"hello"</code>,
+<code>#true</code>, <code>#false</code>, <code>#nil</code> — matches
+that exact value.</p>
+<p><strong>Bind.</strong> <code>,x</code> — matches any value and binds
+it to <code>x</code>.</p>
+<p><strong>Recurse-and-bind.</strong> <code>,(x)</code> — matches any
+value, applies the enclosing gamma combiner to it recursively, and binds
+the result to <code>x</code>.</p>
+<p><strong>Wildcard.</strong> <code>,_</code> — matches any value, binds
+nothing.</p>
+<p><strong>Pair pattern.</strong> <code>(p₁ . p₂)</code> — matches a
+pair whose car matches <code>p₁</code> and cdr matches
+<code>p₂</code>.</p>
+<p><strong>List pattern.</strong> <code>(p₁ p₂ p₃)</code> — shorthand
+for nested pair patterns ending in <code>#nil</code>.
+<code>(,a ,b ,c)</code> expands to
+<code>(,a . (,b . (,c . #nil)))</code>.</p>
+<p><strong>Predicate guard.</strong> <code>(? pred ,x)</code> — applies
+<code>pred</code> to the value; if it returns a true value (anything
+other than <code>#false</code>), binds the value to <code>x</code>; if
+<code>#false</code>, the clause fails. The comma on the binding variable
+is mandatory.</p>
+<h3 id="no-bare-identifiers">5.2 No bare identifiers</h3>
+<p>Bare identifiers in patterns are forbidden. The registrar rejects any
+bare identifier in pattern position as an error.</p>
+<div class="sourceCode" id="cb20"><pre
+class="sourceCode scheme"><code class="sourceCode scheme"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a><span class="co">;; WRONG — registration error</span></span>
+<span id="cb20-2"><a href="#cb20-2" aria-hidden="true" tabindex="-1"></a>(gamma ((a b) <span class="dv">42</span>))</span>
+<span id="cb20-3"><a href="#cb20-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb20-4"><a href="#cb20-4" aria-hidden="true" tabindex="-1"></a><span class="co">;; CORRECT — bind two values</span></span>
+<span id="cb20-5"><a href="#cb20-5" aria-hidden="true" tabindex="-1"></a>(gamma ((,a ,b) <span class="dv">42</span>))</span>
+<span id="cb20-6"><a href="#cb20-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb20-7"><a href="#cb20-7" aria-hidden="true" tabindex="-1"></a><span class="co">;; CORRECT — gamma literal values</span></span>
+<span id="cb20-8"><a href="#cb20-8" aria-hidden="true" tabindex="-1"></a>(gamma ((<span class="dv">0</span> <span class="dv">1</span>) <span class="dv">42</span>))</span></code></pre></div>
+<p>This eliminates ambiguity between “match a resolved value” and “bind
+a new variable.” There is no confusion.</p>
+<h3 id="the-comma">5.3 The comma</h3>
+<p>The comma is the central syntactic device in Möbius patterns. It
+always means: computation has occurred before binding.</p>
+<ul>
+<li><code>,x</code> — bind (extract the subtree).</li>
+<li><code>,(x)</code> — recurse then bind (the enclosing gamma is
+applied to the subtree before binding).</li>
+</ul>
+<p>Outside of patterns, comma has no syntactic role — it is
+<strong>not</strong> an argument separator in any surface.</p>
+<h3 id="tail-matching">5.4 Tail matching</h3>
+<p>Tail matching uses dot notation:</p>
+<pre><code>;; round
+(gamma ((,a ,b . ,rest) (list a b rest)))
+
+;; curly
+gamma { case (,a ,b . ,rest): list(a b rest) }
+
+;; spacy
+gamma:
+    case (,a ,b . ,rest): list(a b rest)</code></pre>
+<h2 id="evaluation">6. Evaluation</h2>
+<h3 id="application-rule">6.1 Application rule</h3>
+<p>An application expression is evaluated as follows:</p>
+<ol type="1">
+<li>Evaluate the combiner (the head).</li>
+<li>Evaluate each argument left to right.</li>
+<li>Construct the argument tree:
+<code>(cons v₁ (cons v₂ (... (cons vₙ #nil))))</code>.</li>
+<li>Apply the combiner to that tree.</li>
+</ol>
+<p><strong>Round:</strong> <code>(f 3 4)</code> — evaluate
+<code>f</code>, evaluate <code>3</code>, evaluate <code>4</code>,
+construct <code>(3 . (4 . #nil))</code>, apply.</p>
+<p><strong>Curly:</strong> <code>f(3 4);</code> — same evaluation,
+different syntax.</p>
+<p><strong>Spacy:</strong> <code>f(3 4)</code> — same evaluation,
+different syntax.</p>
+<p>A combiner that takes “two arguments” is a combiner whose gamma
+pattern destructures a two-element tree:</p>
+<div class="sourceCode" id="cb22"><pre
+class="sourceCode scheme"><code class="sourceCode scheme"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a><span class="co">;; round</span></span>
+<span id="cb22-2"><a href="#cb22-2" aria-hidden="true" tabindex="-1"></a>(<span class="ex">define</span><span class="fu"> add </span>(gamma ((,a ,b) (<span class="op">+</span> a b))))</span>
+<span id="cb22-3"><a href="#cb22-3" aria-hidden="true" tabindex="-1"></a>(add <span class="dv">3</span> <span class="dv">4</span>)</span>
+<span id="cb22-4"><a href="#cb22-4" aria-hidden="true" tabindex="-1"></a><span class="co">;; argument tree is (3 . (4 . #nil)), pattern (,a ,b) matches</span></span>
+<span id="cb22-5"><a href="#cb22-5" aria-hidden="true" tabindex="-1"></a><span class="co">;; =&gt; 7</span></span></code></pre></div>
+<h3 id="tree-in-tree-out">6.2 Tree in, tree out</h3>
+<p>Every combiner takes one argument (a tree) and returns one value (a
+tree). There is no <code>values</code> form and no
+<code>call-with-values</code>. If a procedure wants to return multiple
+things, it returns a tree containing them. The caller destructures the
+result with gamma.</p>
+<div class="sourceCode" id="cb23"><pre
+class="sourceCode scheme"><code class="sourceCode scheme"><span id="cb23-1"><a href="#cb23-1" aria-hidden="true" tabindex="-1"></a><span class="co">;; round</span></span>
+<span id="cb23-2"><a href="#cb23-2" aria-hidden="true" tabindex="-1"></a>(<span class="ex">define</span><span class="fu"> f </span>(gamma ((,x ,y) (<span class="kw">cons</span> (<span class="op">+</span> x y) (<span class="op">*</span> x y)))))</span>
+<span id="cb23-3"><a href="#cb23-3" aria-hidden="true" tabindex="-1"></a>(<span class="ex">define</span><span class="fu"> g </span>(gamma ((,sum <span class="op">.</span> ,product) (<span class="kw">list</span> sum product))))</span>
+<span id="cb23-4"><a href="#cb23-4" aria-hidden="true" tabindex="-1"></a>(g (f <span class="dv">3</span> <span class="dv">4</span>))</span>
+<span id="cb23-5"><a href="#cb23-5" aria-hidden="true" tabindex="-1"></a><span class="co">;; =&gt; (7 12)</span></span></code></pre></div>
+<h3 id="short-circuit-forms">6.3 Short-circuit forms</h3>
+<p><code>if</code>, <code>and</code>, and <code>or</code> are the
+conditional foundations. All three have non-standard evaluation — they
+do not evaluate all their arguments.</p>
+<p><strong><code>if</code></strong> evaluates <code>test</code>; if the
+result is <code>#false</code>, evaluates <code>else</code>; for any
+other value, evaluates <code>then</code>.</p>
+<pre><code>;; round
+(if test then else)
+
+;; curly
+if (test) { then } else { else };
+
+;; spacy
+if (test):
+    then
+else:
+    else</code></pre>
+<p>Only <code>#false</code> triggers the else branch. <code>0</code>,
+<code>#nil</code>, <code>""</code>, and <code>#void</code> are all
+true.</p>
+<p><strong><code>and</code></strong> — short-circuit conjunction.
+Semantically equivalent to nested <code>if</code>:</p>
+<div class="sourceCode" id="cb25"><pre
+class="sourceCode scheme"><code class="sourceCode scheme"><span id="cb25-1"><a href="#cb25-1" aria-hidden="true" tabindex="-1"></a>(<span class="kw">and</span> a b c)</span>
+<span id="cb25-2"><a href="#cb25-2" aria-hidden="true" tabindex="-1"></a><span class="co">;; equivalent to:</span></span>
+<span id="cb25-3"><a href="#cb25-3" aria-hidden="true" tabindex="-1"></a>(<span class="kw">if</span> a (<span class="kw">if</span> b c <span class="dv">#f</span>alse) <span class="dv">#f</span>alse)</span></code></pre></div>
+<p>Returns <code>#false</code> as soon as any argument is
+<code>#false</code>; otherwise returns the last value.</p>
+<p><strong><code>or</code></strong> — short-circuit disjunction.
+Semantically equivalent to nested <code>if</code> with temporary
+bindings to avoid double evaluation:</p>
+<div class="sourceCode" id="cb26"><pre
+class="sourceCode scheme"><code class="sourceCode scheme"><span id="cb26-1"><a href="#cb26-1" aria-hidden="true" tabindex="-1"></a>(<span class="kw">or</span> a b c)</span></code></pre></div>
+<p>Returns the first value that is not <code>#false</code>. If all are
+<code>#false</code>, returns <code>#false</code>.</p>
+<h3 id="infix-evaluation-curly-and-spacy">6.4 Infix evaluation (curly
+and spacy)</h3>
+<p>In curly and spacy, infix expressions are fully parenthesized:</p>
+<div class="sourceCode" id="cb27"><pre
+class="sourceCode scheme"><code class="sourceCode scheme"><span id="cb27-1"><a href="#cb27-1" aria-hidden="true" tabindex="-1"></a><span class="co">;; curly/spacy</span></span>
+<span id="cb27-2"><a href="#cb27-2" aria-hidden="true" tabindex="-1"></a>(<span class="dv">1</span> <span class="op">+</span> <span class="dv">2</span>)         <span class="co">;; valid — reader produces (+ 1 2)</span></span>
+<span id="cb27-3"><a href="#cb27-3" aria-hidden="true" tabindex="-1"></a>(<span class="dv">1</span> <span class="op">+</span> (<span class="dv">2</span> <span class="op">*</span> <span class="dv">3</span>))   <span class="co">;; valid — reader produces (+ 1 (* 2 3))</span></span>
+<span id="cb27-4"><a href="#cb27-4" aria-hidden="true" tabindex="-1"></a><span class="dv">1</span> <span class="op">+</span> <span class="dv">2</span>            <span class="co">;; READER ERROR — missing parentheses</span></span>
+<span id="cb27-5"><a href="#cb27-5" aria-hidden="true" tabindex="-1"></a><span class="dv">1</span> <span class="op">+</span> <span class="dv">2</span> <span class="op">*</span> <span class="dv">3</span>        <span class="co">;; READER ERROR — no precedence</span></span></code></pre></div>
+<p>There is no operator precedence. Every infix expression must be
+explicitly parenthesized. The reader translates <code>(a op b)</code> to
+<code>(op a b)</code>, producing the same tree as round’s prefix
+form.</p>
+<p>An identifier like <code>+</code> in argument position (not infix) is
+just a combiner value:</p>
+<div class="sourceCode" id="cb28"><pre
+class="sourceCode javascript"><code class="sourceCode javascript"><span id="cb28-1"><a href="#cb28-1" aria-hidden="true" tabindex="-1"></a><span class="op">;;</span> curly</span>
+<span id="cb28-2"><a href="#cb28-2" aria-hidden="true" tabindex="-1"></a><span class="fu">map</span>(<span class="op">+</span> my<span class="op">-</span>list)<span class="op">;</span>   <span class="op">;;</span> passes the combiner <span class="op">+</span> <span class="im">as</span> first arg to map</span></code></pre></div>
+<h2 id="define-and-scope">7. Define and Scope</h2>
+<h3 id="top-level-define">7.1 Top-level define</h3>
+<p><code>define</code> binds a name to a value.</p>
+<p><strong>Round:</strong> <code>(define name expression)</code></p>
+<p><strong>Curly:</strong> <code>define name expression;</code></p>
+<p><strong>Spacy:</strong> <code>define name: expression</code></p>
+<p>Top-level definitions are immutable and content-addressed. The
+expression may be a combiner (<code>gamma</code> or
+<code>lambda</code>), a constant (atom, pair, list), or any expression
+that evaluates to an immutable value. Boxes are forbidden in top-level
+definitions.</p>
+<h3 id="content-addressing">7.2 Content addressing</h3>
+<p>In the content-addressed representation, a defined combiner has no
+free variables. Every reference to another definition is resolved to a
+content hash.</p>
+<div class="sourceCode" id="cb29"><pre
+class="sourceCode scheme"><code class="sourceCode scheme"><span id="cb29-1"><a href="#cb29-1" aria-hidden="true" tabindex="-1"></a><span class="co">;; round</span></span>
+<span id="cb29-2"><a href="#cb29-2" aria-hidden="true" tabindex="-1"></a>(<span class="ex">define</span><span class="fu"> x </span><span class="dv">10</span>)</span>
+<span id="cb29-3"><a href="#cb29-3" aria-hidden="true" tabindex="-1"></a>(<span class="ex">define</span><span class="fu"> f </span>(gamma ((,a) (<span class="op">+</span> a x))))</span></code></pre></div>
+<p>In the stored form, <code>f</code> does not contain a free reference
+to <code>x</code>. It contains the hash of <code>10</code>.</p>
+<h3 id="the-dependency-dag">7.3 The dependency DAG</h3>
+<p>The dependency graph between top-level definition
+<strong>units</strong> is strictly a directed acyclic graph. The
+registrar detects mutually recursive definitions and bundles them into a
+single content-addressed unit. The hash covers the entire mutual
+group.</p>
+<p><strong>Round:</strong></p>
+<div class="sourceCode" id="cb30"><pre
+class="sourceCode scheme"><code class="sourceCode scheme"><span id="cb30-1"><a href="#cb30-1" aria-hidden="true" tabindex="-1"></a><span class="co">;; odd? and even? reference each other — the registrar bundles them</span></span>
+<span id="cb30-2"><a href="#cb30-2" aria-hidden="true" tabindex="-1"></a>(<span class="ex">define</span><span class="fu"> odd? </span>(gamma ((<span class="dv">0</span> <span class="dv">#f</span>alse)</span>
+<span id="cb30-3"><a href="#cb30-3" aria-hidden="true" tabindex="-1"></a>                     (,n (<span class="kw">even?</span> (<span class="op">-</span> n <span class="dv">1</span>))))))</span>
+<span id="cb30-4"><a href="#cb30-4" aria-hidden="true" tabindex="-1"></a>(<span class="ex">define</span><span class="fu"> even? </span>(gamma ((<span class="dv">0</span> <span class="dv">#t</span>rue)</span>
+<span id="cb30-5"><a href="#cb30-5" aria-hidden="true" tabindex="-1"></a>                      (,n (<span class="kw">odd?</span> (<span class="op">-</span> n <span class="dv">1</span>))))))</span></code></pre></div>
+<p><strong>Curly:</strong></p>
+<div class="sourceCode" id="cb31"><pre
+class="sourceCode javascript"><code class="sourceCode javascript"><span id="cb31-1"><a href="#cb31-1" aria-hidden="true" tabindex="-1"></a>define odd<span class="op">?</span> gamma {</span>
+<span id="cb31-2"><a href="#cb31-2" aria-hidden="true" tabindex="-1"></a>    <span class="cf">case</span> <span class="dv">0</span><span class="op">:</span> #false<span class="op">;</span></span>
+<span id="cb31-3"><a href="#cb31-3" aria-hidden="true" tabindex="-1"></a>    <span class="cf">case</span> <span class="op">,</span><span class="dt">n</span><span class="op">:</span> even<span class="op">?</span>((n <span class="op">-</span> <span class="dv">1</span>))<span class="op">;</span></span>
+<span id="cb31-4"><a href="#cb31-4" aria-hidden="true" tabindex="-1"></a>}<span class="op">;</span></span>
+<span id="cb31-5"><a href="#cb31-5" aria-hidden="true" tabindex="-1"></a>define even<span class="op">?</span> gamma {</span>
+<span id="cb31-6"><a href="#cb31-6" aria-hidden="true" tabindex="-1"></a>    <span class="cf">case</span> <span class="dv">0</span><span class="op">:</span> #true<span class="op">;</span></span>
+<span id="cb31-7"><a href="#cb31-7" aria-hidden="true" tabindex="-1"></a>    <span class="cf">case</span> <span class="op">,</span><span class="dt">n</span><span class="op">:</span> odd<span class="op">?</span>((n <span class="op">-</span> <span class="dv">1</span>))<span class="op">;</span></span>
+<span id="cb31-8"><a href="#cb31-8" aria-hidden="true" tabindex="-1"></a>}<span class="op">;</span></span></code></pre></div>
+<p><strong>Spacy:</strong></p>
+<div class="sourceCode" id="cb32"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb32-1"><a href="#cb32-1" aria-hidden="true" tabindex="-1"></a>define odd?: gamma:</span>
+<span id="cb32-2"><a href="#cb32-2" aria-hidden="true" tabindex="-1"></a>    <span class="cf">case</span> <span class="dv">0</span>: <span class="co">#false</span></span>
+<span id="cb32-3"><a href="#cb32-3" aria-hidden="true" tabindex="-1"></a>    case ,n: even?((n <span class="op">-</span> <span class="dv">1</span>))</span>
+<span id="cb32-4"><a href="#cb32-4" aria-hidden="true" tabindex="-1"></a>define even?: gamma:</span>
+<span id="cb32-5"><a href="#cb32-5" aria-hidden="true" tabindex="-1"></a>    <span class="cf">case</span> <span class="dv">0</span>: <span class="co">#true</span></span>
+<span id="cb32-6"><a href="#cb32-6" aria-hidden="true" tabindex="-1"></a>    case ,n: odd?((n <span class="op">-</span> <span class="dv">1</span>))</span></code></pre></div>
+<p><strong>Stale references.</strong> If the programmer later updates
+<code>odd?</code> without updating <code>even?</code>, the result
+is:</p>
+<pre><code>odd?₁ → even?₀ → odd?₀</code></pre>
+<p>This is a valid DAG — no structural problem. But it is a semantic
+bug: <code>even?₀</code> still calls the old <code>odd?₀</code>, not the
+new <code>odd?₁</code>. The content store faithfully preserves the stale
+reference. Tooling should warn about broken mutual groups, but the
+language does not forbid them.</p>
+<h3 id="nested-define">7.4 Nested define</h3>
+<p>Within a combiner body, <code>define</code> creates local bindings.
+Nested definitions are mutually visible (hoisted), enabling local mutual
+recursion.</p>
+<h3 id="no-let-no-let">7.5 No let, no let*</h3>
+<p>Möbius has no <code>let</code>, <code>let*</code>, or
+<code>letrec</code> as separate binding forms. All local binding is done
+through nested <code>define</code> within a <code>begin</code> block
+(round), brace block (curly), or indented block (spacy). Since nested
+defines are mutually visible, this subsumes <code>letrec</code>.</p>
+<h3 id="sequencing">7.6 Sequencing</h3>
+<p><strong>Round:</strong> <code>(begin e₁ e₂ ... eₙ)</code> — evaluates
+each expression in order, returns the value of <code>eₙ</code>.</p>
+<p><strong>Curly:</strong> <code>{ e₁; e₂; ... eₙ }</code> — braces and
+semicolons. Last expression is the return value.</p>
+<p><strong>Spacy:</strong> Newlines under the same indentation level.
+Last expression is the return value.</p>
+<p><code>begin</code> is a universal concept — only its surface syntax
+varies.</p>
+<h2 id="lambda">8. Lambda</h2>
+<p><code>lambda</code> is a foundation that constructs a single-clause
+<code>gamma</code> with all-bind patterns. Semantically equivalent to
+<code>gamma</code>: <code>(lambda (a b) body)</code> =
+<code>(gamma ((,a ,b) body))</code>. The compiler may exploit this
+equivalence.</p>
+<p><strong>Equivalence:</strong></p>
+<div class="sourceCode" id="cb34"><pre
+class="sourceCode scheme"><code class="sourceCode scheme"><span id="cb34-1"><a href="#cb34-1" aria-hidden="true" tabindex="-1"></a><span class="co">;; (lambda (a b c) body) is equivalent to:</span></span>
+<span id="cb34-2"><a href="#cb34-2" aria-hidden="true" tabindex="-1"></a><span class="co">;; (gamma ((,a ,b ,c) body))</span></span></code></pre></div>
+<p>Lambda parameters are always bare names (no comma) — all parameters
+are binds by definition.</p>
+<p><strong>Round:</strong></p>
+<div class="sourceCode" id="cb35"><pre
+class="sourceCode scheme"><code class="sourceCode scheme"><span id="cb35-1"><a href="#cb35-1" aria-hidden="true" tabindex="-1"></a>(<span class="ex">define</span><span class="fu"> add </span>(<span class="kw">lambda</span> (a b) (<span class="op">+</span> a b)))</span></code></pre></div>
+<p><strong>Curly:</strong></p>
+<div class="sourceCode" id="cb36"><pre
+class="sourceCode javascript"><code class="sourceCode javascript"><span id="cb36-1"><a href="#cb36-1" aria-hidden="true" tabindex="-1"></a>define add <span class="fu">lambda</span> (a b) { (a <span class="op">+</span> b) }<span class="op">;</span></span></code></pre></div>
+<p><strong>Spacy:</strong></p>
+<div class="sourceCode" id="cb37"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb37-1"><a href="#cb37-1" aria-hidden="true" tabindex="-1"></a>define add: <span class="kw">lambda</span> (a b): (a <span class="op">+</span> b)</span></code></pre></div>
+<p>Lambda must always be explicit. There is no
+<code>(define (f x) body)</code> shorthand. If you want a combiner, you
+write <code>gamma</code> or <code>lambda</code>.</p>
+<h2 id="capsules">9. Capsules</h2>
+<p>A capsule type is defined by a 128-bit type identifier. The
+foundation <code>encapsulation-type</code> takes this identifier and
+returns a tree of three combiners.</p>
+<p><strong>Round:</strong></p>
+<div class="sourceCode" id="cb38"><pre
+class="sourceCode scheme"><code class="sourceCode scheme"><span id="cb38-1"><a href="#cb38-1" aria-hidden="true" tabindex="-1"></a>(<span class="ex">define</span><span class="fu"> my-type </span>(encapsulation-type <span class="dv">0x9f3a7b2c4d5e6f708192a3b4c5d6e7f8</span>))</span>
+<span id="cb38-2"><a href="#cb38-2" aria-hidden="true" tabindex="-1"></a>(<span class="ex">define</span><span class="fu"> make-my </span>(<span class="kw">car</span> my-type))</span>
+<span id="cb38-3"><a href="#cb38-3" aria-hidden="true" tabindex="-1"></a>(<span class="ex">define</span><span class="fu"> my? </span>(<span class="kw">car</span> (<span class="kw">cdr</span> my-type)))</span>
+<span id="cb38-4"><a href="#cb38-4" aria-hidden="true" tabindex="-1"></a>(<span class="ex">define</span><span class="fu"> unwrap-my </span>(<span class="kw">car</span> (<span class="kw">cdr</span> (<span class="kw">cdr</span> my-type))))</span></code></pre></div>
+<p><strong>Curly:</strong></p>
+<div class="sourceCode" id="cb39"><pre
+class="sourceCode javascript"><code class="sourceCode javascript"><span id="cb39-1"><a href="#cb39-1" aria-hidden="true" tabindex="-1"></a>define my<span class="op">-</span>type encapsulation<span class="op">-</span><span class="fu">type</span>(<span class="bn">0x9f3a7b2c4d5e6f708192a3b4c5d6e7f8</span>)<span class="op">;</span></span>
+<span id="cb39-2"><a href="#cb39-2" aria-hidden="true" tabindex="-1"></a>define make<span class="op">-</span>my <span class="fu">car</span>(my<span class="op">-</span>type)<span class="op">;</span></span>
+<span id="cb39-3"><a href="#cb39-3" aria-hidden="true" tabindex="-1"></a>define my<span class="op">?</span> <span class="fu">car</span>(<span class="fu">cdr</span>(my<span class="op">-</span>type))<span class="op">;</span></span>
+<span id="cb39-4"><a href="#cb39-4" aria-hidden="true" tabindex="-1"></a>define unwrap<span class="op">-</span>my <span class="fu">car</span>(<span class="fu">cdr</span>(<span class="fu">cdr</span>(my<span class="op">-</span>type)))<span class="op">;</span></span></code></pre></div>
+<p><strong>Spacy:</strong></p>
+<div class="sourceCode" id="cb40"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb40-1"><a href="#cb40-1" aria-hidden="true" tabindex="-1"></a>define my<span class="op">-</span><span class="bu">type</span>: encapsulation<span class="op">-</span><span class="bu">type</span>(<span class="bn">0x9f3a7b2c4d5e6f708192a3b4c5d6e7f8</span>)</span>
+<span id="cb40-2"><a href="#cb40-2" aria-hidden="true" tabindex="-1"></a>define make<span class="op">-</span>my: car(my<span class="op">-</span><span class="bu">type</span>)</span>
+<span id="cb40-3"><a href="#cb40-3" aria-hidden="true" tabindex="-1"></a>define my?: car(cdr(my<span class="op">-</span><span class="bu">type</span>))</span>
+<span id="cb40-4"><a href="#cb40-4" aria-hidden="true" tabindex="-1"></a>define unwrap<span class="op">-</span>my: car(cdr(cdr(my<span class="op">-</span><span class="bu">type</span>)))</span></code></pre></div>
+<p><strong>Constructor</strong> (<code>car</code>): wraps any tree in an
+opaque capsule tagged with this type ID.</p>
+<p><strong>Predicate</strong> (<code>car</code> of <code>cdr</code>):
+returns <code>#true</code> if a value is a capsule with this type ID,
+<code>#false</code> otherwise.</p>
+<p><strong>Accessor</strong> (<code>car</code> of <code>cdr</code> of
+<code>cdr</code>): unwraps the capsule, returning the inner tree. Fails
+if the value does not have this type ID.</p>
+<h3 id="non-generative-types">9.1 Non-generative types</h3>
+<p>Capsule types are <strong>non-generative</strong>: the same 128-bit
+identifier anywhere defines the same type. Two modules using the same ID
+have compatible types. Two modules using different IDs have incompatible
+types, even if structurally identical.</p>
+<p>The 128-bit identifier is an atom — it lives in the content store
+like any other data. There is no runtime generation of fresh types.</p>
+<p><strong>Collision.</strong> Because type identifiers are chosen by
+the programmer, two unrelated capsule types may accidentally share the
+same ID. This is a bug, not a feature. Linting tools should detect
+duplicate type IDs across a codebase. The spec recommends deriving type
+IDs deterministically (e.g., from a hash of the defining module’s
+content and a local name) rather than choosing them by hand.</p>
+<h3 id="capsules-and-predicates">9.2 Capsules and predicates</h3>
+<p>A capsule’s predicate is its type. There is no separate type
+declaration language. A type is a question: does this value satisfy this
+predicate?</p>
+<p>Predicates compose freely. A value may satisfy multiple predicates
+without any hierarchical relationship. There is no inheritance, no class
+hierarchy. Classification is external and open.</p>
+<h3 id="capsules-and-mutability">9.3 Capsules and mutability</h3>
+<p>A capsule wraps any value — including boxes. If a capsule contains a
+box (or a tree containing boxes), the capsule’s contents are mutable
+through <code>box!</code>. The capsule itself is opaque and cannot be
+swapped out, but boxes inside it can be mutated.</p>
+<p>A capsule wrapping only atoms and pairs is immutable. A capsule
+wrapping a box is a stateful object. The distinction is determined by
+what the programmer puts inside.</p>
+<h3 id="decapsulation">9.4 Decapsulation</h3>
+<p>Decapsulation is always explicit. Code must use the accessor to
+unwrap a capsule before matching on its contents. Pattern-level capsule
+destructuring is not supported — use a predicate guard to dispatch on
+type, then call the accessor in the body.</p>
+<div class="sourceCode" id="cb41"><pre
+class="sourceCode scheme"><code class="sourceCode scheme"><span id="cb41-1"><a href="#cb41-1" aria-hidden="true" tabindex="-1"></a><span class="co">;; round</span></span>
+<span id="cb41-2"><a href="#cb41-2" aria-hidden="true" tabindex="-1"></a>(gamma (((<span class="op">?</span> my? ,x) (do-something (unwrap-my x)))</span>
+<span id="cb41-3"><a href="#cb41-3" aria-hidden="true" tabindex="-1"></a>        (,other     (do-other other))))</span>
+<span id="cb41-4"><a href="#cb41-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb41-5"><a href="#cb41-5" aria-hidden="true" tabindex="-1"></a><span class="co">;; curly</span></span>
+<span id="cb41-6"><a href="#cb41-6" aria-hidden="true" tabindex="-1"></a>gamma <span class="op">{</span></span>
+<span id="cb41-7"><a href="#cb41-7" aria-hidden="true" tabindex="-1"></a>    <span class="kw">case</span> (<span class="op">?</span> my? ,x): do-something(unwrap-my(x))<span class="co">;</span></span>
+<span id="cb41-8"><a href="#cb41-8" aria-hidden="true" tabindex="-1"></a>    <span class="kw">case</span> ,other: do-other(other)<span class="co">;</span></span>
+<span id="cb41-9"><a href="#cb41-9" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb41-10"><a href="#cb41-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb41-11"><a href="#cb41-11" aria-hidden="true" tabindex="-1"></a><span class="co">;; spacy</span></span>
+<span id="cb41-12"><a href="#cb41-12" aria-hidden="true" tabindex="-1"></a>gamma:</span>
+<span id="cb41-13"><a href="#cb41-13" aria-hidden="true" tabindex="-1"></a>    <span class="kw">case</span> (<span class="op">?</span> my? ,x): do-something(unwrap-my(x))</span>
+<span id="cb41-14"><a href="#cb41-14" aria-hidden="true" tabindex="-1"></a>    <span class="kw">case</span> ,other: do-other(other)</span></code></pre></div>
+<h2 id="boxes">10. Boxes</h2>
+<p>A box is a mutable indirection cell. Boxes are the only mutable
+values in Möbius.</p>
+<h3 id="foundations-1">10.1 Foundations</h3>
+<ul>
+<li><code>(box v)</code> — create a new box containing the value
+<code>v</code>.</li>
+<li><code>(unbox b)</code> — return the current contents of box
+<code>b</code>.</li>
+<li><code>(box! b v)</code> — replace the contents of box <code>b</code>
+with <code>v</code>. Returns <code>#void</code>.</li>
+</ul>
+<h3 id="restrictions">10.2 Restrictions</h3>
+<p>Boxes are <strong>forbidden in top-level definitions</strong>. A
+top-level <code>define</code> must bind an immutable,
+content-addressable value. Boxes exist only at runtime, within nested
+scope:</p>
+<p><strong>Round:</strong></p>
+<div class="sourceCode" id="cb42"><pre
+class="sourceCode scheme"><code class="sourceCode scheme"><span id="cb42-1"><a href="#cb42-1" aria-hidden="true" tabindex="-1"></a>(<span class="ex">define</span><span class="fu"> make-counter</span></span>
+<span id="cb42-2"><a href="#cb42-2" aria-hidden="true" tabindex="-1"></a>  (<span class="kw">lambda</span> ()</span>
+<span id="cb42-3"><a href="#cb42-3" aria-hidden="true" tabindex="-1"></a>    (<span class="kw">begin</span></span>
+<span id="cb42-4"><a href="#cb42-4" aria-hidden="true" tabindex="-1"></a>      (<span class="ex">define</span><span class="fu"> state </span>(box <span class="dv">0</span>))</span>
+<span id="cb42-5"><a href="#cb42-5" aria-hidden="true" tabindex="-1"></a>      (gamma ((<span class="st">&quot;get&quot;</span>  (unbox state))</span>
+<span id="cb42-6"><a href="#cb42-6" aria-hidden="true" tabindex="-1"></a>              (<span class="st">&quot;inc&quot;</span>  (<span class="kw">begin</span> (box! state (<span class="op">+</span> (unbox state) <span class="dv">1</span>))</span>
+<span id="cb42-7"><a href="#cb42-7" aria-hidden="true" tabindex="-1"></a>                             (unbox state))))))))</span></code></pre></div>
+<p><strong>Curly:</strong></p>
+<div class="sourceCode" id="cb43"><pre
+class="sourceCode javascript"><code class="sourceCode javascript"><span id="cb43-1"><a href="#cb43-1" aria-hidden="true" tabindex="-1"></a>define make<span class="op">-</span>counter <span class="fu">lambda</span> () {</span>
+<span id="cb43-2"><a href="#cb43-2" aria-hidden="true" tabindex="-1"></a>    define state <span class="fu">box</span>(<span class="dv">0</span>)<span class="op">;</span></span>
+<span id="cb43-3"><a href="#cb43-3" aria-hidden="true" tabindex="-1"></a>    gamma {</span>
+<span id="cb43-4"><a href="#cb43-4" aria-hidden="true" tabindex="-1"></a>        <span class="cf">case</span> <span class="st">&quot;get&quot;</span><span class="op">:</span> <span class="fu">unbox</span>(state)<span class="op">;</span></span>
+<span id="cb43-5"><a href="#cb43-5" aria-hidden="true" tabindex="-1"></a>        <span class="cf">case</span> <span class="st">&quot;inc&quot;</span><span class="op">:</span> {</span>
+<span id="cb43-6"><a href="#cb43-6" aria-hidden="true" tabindex="-1"></a>            box<span class="op">!</span>(<span class="fu">state</span> (<span class="fu">unbox</span>(state) <span class="op">+</span> <span class="dv">1</span>))<span class="op">;</span></span>
+<span id="cb43-7"><a href="#cb43-7" aria-hidden="true" tabindex="-1"></a>            <span class="fu">unbox</span>(state)</span>
+<span id="cb43-8"><a href="#cb43-8" aria-hidden="true" tabindex="-1"></a>        }<span class="op">;</span></span>
+<span id="cb43-9"><a href="#cb43-9" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="cb43-10"><a href="#cb43-10" aria-hidden="true" tabindex="-1"></a>}<span class="op">;</span></span></code></pre></div>
+<p><strong>Spacy:</strong></p>
+<div class="sourceCode" id="cb44"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb44-1"><a href="#cb44-1" aria-hidden="true" tabindex="-1"></a>define make<span class="op">-</span>counter: <span class="kw">lambda</span> ():</span>
+<span id="cb44-2"><a href="#cb44-2" aria-hidden="true" tabindex="-1"></a>    define state: box(<span class="dv">0</span>)</span>
+<span id="cb44-3"><a href="#cb44-3" aria-hidden="true" tabindex="-1"></a>    gamma:</span>
+<span id="cb44-4"><a href="#cb44-4" aria-hidden="true" tabindex="-1"></a>        <span class="cf">case</span> <span class="st">&quot;get&quot;</span>: unbox(state)</span>
+<span id="cb44-5"><a href="#cb44-5" aria-hidden="true" tabindex="-1"></a>        <span class="cf">case</span> <span class="st">&quot;inc&quot;</span>:</span>
+<span id="cb44-6"><a href="#cb44-6" aria-hidden="true" tabindex="-1"></a>            box<span class="op">!</span>(state (unbox(state) <span class="op">+</span> <span class="dv">1</span>))</span>
+<span id="cb44-7"><a href="#cb44-7" aria-hidden="true" tabindex="-1"></a>            unbox(state)</span></code></pre></div>
+<h3 id="box-identity">10.3 Box identity</h3>
+<p>Each <code>box</code> call creates a fresh, distinct cell.
+<code>(eq? (box 0) (box 0))</code> is <code>#false</code>.</p>
+<p><code>equal?</code> on boxes compares their current contents
+recursively — it is a snapshot comparison.</p>
+<h3 id="self-referential-boxes">10.4 Self-referential boxes</h3>
+<p>A box may contain itself:</p>
+<div class="sourceCode" id="cb45"><pre
+class="sourceCode scheme"><code class="sourceCode scheme"><span id="cb45-1"><a href="#cb45-1" aria-hidden="true" tabindex="-1"></a>(<span class="ex">define</span><span class="fu"> b </span>(box #nil))</span>
+<span id="cb45-2"><a href="#cb45-2" aria-hidden="true" tabindex="-1"></a>(box! b b)</span>
+<span id="cb45-3"><a href="#cb45-3" aria-hidden="true" tabindex="-1"></a>(<span class="kw">eq?</span> (unbox b) b)   <span class="co">;; =&gt; #true</span></span></code></pre></div>
+<p>This is permitted. <code>equal?</code> on cyclic box structures is
+undefined behavior — implementations may diverge, detect the cycle, or
+signal an error.</p>
+<h2 id="predicates-and-typing">11. Predicates and Typing</h2>
+<p>Möbius’s type discipline is based on predicate calculus rather than
+object-oriented classification.</p>
+<p>Where OOP asks “what IS this value” (identity), Möbius asks “what is
+TRUE of this value” (predication). The distinction matters:</p>
+<ul>
+<li>A value can satisfy any number of predicates.</li>
+<li>Predicates are ordinary combiners.</li>
+<li>No type must be anticipated at definition time.</li>
+<li>Adding new predicates never requires modifying existing code.</li>
+</ul>
+<p>Type inference in Möbius means: given the predicates that hold of a
+combiner’s input, which predicates can be proved to hold of its
+output?</p>
+<p><em>The formal inference mechanism is to be specified in a future
+revision.</em></p>
+<h2 id="continuations-and-control-flow">12. Continuations and Control
+Flow</h2>
+<p>Möbius provides three continuation foundations and one well-known
+continuation binding for non-local control flow. Because
+content-addressed definitions have no free variables, these foundations
+operate entirely at runtime on the continuation — the chain of pending
+computation — rather than on lexical environments.</p>
+<h3 id="callcc">12.1 call/cc</h3>
+<p><code>call/cc</code> takes a single combiner as argument and calls it
+with a first-class continuation object representing the current point of
+execution. This continuation is unlimited — it captures the entire
+future of the computation. The continuation is a value like any other
+and may be stored in a tree, returned, or passed to other combiners. It
+remains valid indefinitely, including after the dynamic extent of the
+<code>call/cc</code> has exited.</p>
+<p>If the continuation is never applied, it has no effect. The combiner
+may return normally, in which case the result of <code>call/cc</code> is
+whatever the combiner returns.</p>
+<h3 id="continuation-apply">12.2 continuation-apply</h3>
+<p><code>continuation-apply</code> takes a continuation object and a
+value, and delivers that value to the captured continuation. This
+abandons the current computation entirely — control jumps to the point
+captured by <code>call/cc</code>, and the delivered value becomes the
+result of that original <code>call/cc</code> expression.</p>
+<p>If the continuation crosses guard boundaries, the corresponding guard
+clauses are invoked during the pass. Applying a continuation that was
+captured in a dynamic extent that has already exited is permitted.
+Applying the same continuation multiple times is permitted.</p>
+<h3 id="guard">12.3 guard</h3>
+<p><code>guard</code> installs entry and exit gamma clauses on a
+continuation boundary and executes a thunk within that boundary. It
+merges the roles of Scheme’s <code>guard</code> (exception handling) and
+<code>dynamic-wind</code> (entry/exit behavior) into a single
+pattern-based mechanism.</p>
+<p><strong>Round:</strong></p>
+<div class="sourceCode" id="cb46"><pre
+class="sourceCode scheme"><code class="sourceCode scheme"><span id="cb46-1"><a href="#cb46-1" aria-hidden="true" tabindex="-1"></a>(<span class="kw">guard</span></span>
+<span id="cb46-2"><a href="#cb46-2" aria-hidden="true" tabindex="-1"></a>  (entry (pattern₁ handler₁)</span>
+<span id="cb46-3"><a href="#cb46-3" aria-hidden="true" tabindex="-1"></a>         (pattern₂ handler₂)</span>
+<span id="cb46-4"><a href="#cb46-4" aria-hidden="true" tabindex="-1"></a>         <span class="op">...</span>)</span>
+<span id="cb46-5"><a href="#cb46-5" aria-hidden="true" tabindex="-1"></a>  thunk</span>
+<span id="cb46-6"><a href="#cb46-6" aria-hidden="true" tabindex="-1"></a>  (exit (pattern₁ handler₁)</span>
+<span id="cb46-7"><a href="#cb46-7" aria-hidden="true" tabindex="-1"></a>        (pattern₂ handler₂)</span>
+<span id="cb46-8"><a href="#cb46-8" aria-hidden="true" tabindex="-1"></a>        <span class="op">...</span>))</span></code></pre></div>
+<p><strong>Curly:</strong></p>
+<div class="sourceCode" id="cb47"><pre
+class="sourceCode javascript"><code class="sourceCode javascript"><span id="cb47-1"><a href="#cb47-1" aria-hidden="true" tabindex="-1"></a>guard {</span>
+<span id="cb47-2"><a href="#cb47-2" aria-hidden="true" tabindex="-1"></a>    <span class="dt">entry</span><span class="op">:</span></span>
+<span id="cb47-3"><a href="#cb47-3" aria-hidden="true" tabindex="-1"></a>        <span class="cf">case</span> <span class="dt">pattern₁</span><span class="op">:</span> handler₁<span class="op">;</span></span>
+<span id="cb47-4"><a href="#cb47-4" aria-hidden="true" tabindex="-1"></a>        <span class="cf">case</span> <span class="dt">pattern₂</span><span class="op">:</span> handler₂<span class="op">;</span></span>
+<span id="cb47-5"><a href="#cb47-5" aria-hidden="true" tabindex="-1"></a>    <span class="dt">body</span><span class="op">:</span> thunk<span class="op">;</span></span>
+<span id="cb47-6"><a href="#cb47-6" aria-hidden="true" tabindex="-1"></a>    <span class="dt">exit</span><span class="op">:</span></span>
+<span id="cb47-7"><a href="#cb47-7" aria-hidden="true" tabindex="-1"></a>        <span class="cf">case</span> <span class="dt">pattern₁</span><span class="op">:</span> handler₁<span class="op">;</span></span>
+<span id="cb47-8"><a href="#cb47-8" aria-hidden="true" tabindex="-1"></a>        <span class="cf">case</span> <span class="dt">pattern₂</span><span class="op">:</span> handler₂<span class="op">;</span></span>
+<span id="cb47-9"><a href="#cb47-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb47-10"><a href="#cb47-10" aria-hidden="true" tabindex="-1"></a>}<span class="op">;</span></span></code></pre></div>
+<p><strong>Spacy:</strong></p>
+<div class="sourceCode" id="cb48"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb48-1"><a href="#cb48-1" aria-hidden="true" tabindex="-1"></a>guard:</span>
+<span id="cb48-2"><a href="#cb48-2" aria-hidden="true" tabindex="-1"></a>    entry:</span>
+<span id="cb48-3"><a href="#cb48-3" aria-hidden="true" tabindex="-1"></a>        <span class="cf">case</span> pattern₁: handler₁</span>
+<span id="cb48-4"><a href="#cb48-4" aria-hidden="true" tabindex="-1"></a>        <span class="cf">case</span> pattern₂: handler₂</span>
+<span id="cb48-5"><a href="#cb48-5" aria-hidden="true" tabindex="-1"></a>    body: thunk</span>
+<span id="cb48-6"><a href="#cb48-6" aria-hidden="true" tabindex="-1"></a>    exit:</span>
+<span id="cb48-7"><a href="#cb48-7" aria-hidden="true" tabindex="-1"></a>        <span class="cf">case</span> pattern₁: handler₁</span>
+<span id="cb48-8"><a href="#cb48-8" aria-hidden="true" tabindex="-1"></a>        <span class="cf">case</span> pattern₂: handler₂</span></code></pre></div>
+<p><strong>Entry clauses.</strong> When an abnormal pass (a value
+delivered via <code>continuation-apply</code>) crosses into this guard
+boundary from outside, the passed value is matched against the entry
+clauses in order. If a clause matches, its body executes to handle the
+pass. If no clause matches, the pass propagates automatically.</p>
+<p><strong>Thunk.</strong> A zero-argument combiner that executes as the
+guarded body. The thunk runs within the protection of the guard
+boundary.</p>
+<p><strong>Exit clauses.</strong> When an abnormal pass crosses out of
+this guard boundary to outside, the passed value is matched against the
+exit clauses. This is the cleanup mechanism — exit clauses run when
+control leaves the guarded region, whether normally or via
+continuation.</p>
+<p>Guards are the sole mechanism for intercepting non-local control
+flow. They subsume exception handling (entry clauses matching error
+values), cleanup (exit clauses performing side effects then
+propagating), and dynamic-wind entry/exit behavior (entry and exit
+clauses on the same boundary).</p>
+<p>The key edge case: if a guard clause itself signals an abnormal exit,
+that exit propagates outward past the current guard — a guard does not
+intercept its own errors.</p>
+<h3 id="the-root-continuation-continuation-exit">12.4 The root
+continuation (continuation-exit)</h3>
+<p><code>continuation-exit</code> is a well-known binding — not a
+separate foundation, but the root continuation that exists when a
+program starts. It represents “terminate the process.”</p>
+<p>Delivering a value to <code>continuation-exit</code> terminates the
+program. The delivered value must be an integer 0–255 (POSIX exit code).
+Delivering a non-integer or out-of-range value is an error.</p>
+<div class="sourceCode" id="cb49"><pre
+class="sourceCode scheme"><code class="sourceCode scheme"><span id="cb49-1"><a href="#cb49-1" aria-hidden="true" tabindex="-1"></a><span class="co">;; round</span></span>
+<span id="cb49-2"><a href="#cb49-2" aria-hidden="true" tabindex="-1"></a>(continuation-apply continuation-exit <span class="dv">0</span>)   <span class="co">;; exit successfully</span></span>
+<span id="cb49-3"><a href="#cb49-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb49-4"><a href="#cb49-4" aria-hidden="true" tabindex="-1"></a><span class="co">;; curly</span></span>
+<span id="cb49-5"><a href="#cb49-5" aria-hidden="true" tabindex="-1"></a>continuation-apply(continuation-exit <span class="dv">0</span>)<span class="co">;</span></span>
+<span id="cb49-6"><a href="#cb49-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb49-7"><a href="#cb49-7" aria-hidden="true" tabindex="-1"></a><span class="co">;; spacy</span></span>
+<span id="cb49-8"><a href="#cb49-8" aria-hidden="true" tabindex="-1"></a>continuation-apply(continuation-exit <span class="dv">0</span>)</span></code></pre></div>
+<p>Guards installed between the current point and the root continuation
+are traversed on exit, so cleanup code runs.</p>
+<p>If the program’s main expression returns normally (without explicitly
+calling <code>continuation-exit</code>), the runtime delivers
+<code>0</code> to the root continuation — successful termination.</p>
+<h2 id="reader-syntax">13. Reader Syntax</h2>
+<p>The reader converts a character stream into trees. It is not part of
+the language semantics — it is one possible surface syntax. This section
+specifies the round (S-expression) reader. The curly and spacy readers
+(§3.3, §3.4) produce identical trees through different surface
+conventions.</p>
+<h3 id="atoms">13.1 Atoms</h3>
+<p><strong>Integers.</strong> A sequence of digits, optionally preceded
+by <code>-</code> or <code>+</code>. Examples: <code>42</code>,
+<code>-7</code>, <code>0</code>, <code>+3</code>.</p>
+<p><strong>Floats.</strong> Digits with a decimal point, optionally
+preceded by a sign, optionally followed by an exponent. Examples:
+<code>3.14</code>, <code>-0.5</code>, <code>1e10</code>,
+<code>2.5e-3</code>.</p>
+<p><strong>Characters.</strong> <code>#\</code> followed by a single
+character or a character name. Examples: <code>#\a</code>,
+<code>#\Z</code>, <code>#\space</code>, <code>#\newline</code>,
+<code>#\tab</code>. The reader recognizes at least <code>space</code>,
+<code>newline</code>, <code>tab</code>, and <code>return</code>.</p>
+<p><strong>Strings.</strong> Delimited by double quotes. Escape
+sequences: <code>\\</code>, <code>\"</code>, <code>\n</code>,
+<code>\t</code>, <code>\r</code>.</p>
+<p><strong>Type identifiers.</strong> A 128-bit integer in hexadecimal
+with <code>0x</code> prefix. Example:
+<code>0x9f3a7b2c4d5e6f708192a3b4c5d6e7f8</code>.</p>
+<h3 id="hash-identifiers">13.2 Hash-identifiers</h3>
+<p>A <code>#</code> followed by one or more alphanumeric characters or
+hyphens. Hash-identifiers are identifiers — resolved at registration
+time like symbols.</p>
+<p>Four are pre-defined:</p>
+<ul>
+<li><code>#true</code> — the truthy value.</li>
+<li><code>#false</code> — the sole false value.</li>
+<li><code>#nil</code> — the empty list.</li>
+<li><code>#void</code> — the void singleton, returned by side-effecting
+operations.</li>
+</ul>
+<p>All others are regular identifiers. By convention, a hash-identifier
+names a singleton:</p>
+<div class="sourceCode" id="cb50"><pre
+class="sourceCode scheme"><code class="sourceCode scheme"><span id="cb50-1"><a href="#cb50-1" aria-hidden="true" tabindex="-1"></a>(<span class="ex">define</span><span class="fu"> </span><span class="sc">#eo</span>f-type (encapsulation-type <span class="dv">0x00000000000000000000000000000001</span>))</span>
+<span id="cb50-2"><a href="#cb50-2" aria-hidden="true" tabindex="-1"></a>(<span class="ex">define</span><span class="fu"> </span><span class="sc">#eo</span>f ((<span class="kw">car</span> <span class="sc">#eo</span>f-type) #nil))</span></code></pre></div>
+<h3 id="symbols-surface-syntax-only">13.3 Symbols (surface syntax
+only)</h3>
+<p>An identifier starts with an alphabetical character or one of
+<code>+ - * / &lt; &gt; = ? ! _</code> and continues until whitespace or
+a structural delimiter: <code>( ) { } ; : ' `` " ,</code>. This rule is
+the same across all three surfaces (§3.5).</p>
+<p>Examples: <code>foo</code>, <code>car</code>, <code>+</code>,
+<code>list-&gt;string</code>, <code>point?</code>,
+<code>encapsulation-type</code>, <code>ab-cd</code>,
+<code>box!</code>.</p>
+<p>Symbols are surface syntax only. At registration time, they are
+resolved to content hashes and disappear. They do not exist as runtime
+values.</p>
+<h3 id="parentheses-and-pairs">13.4 Parentheses and pairs</h3>
+<p><code>(a b c)</code> reads as
+<code>(cons a (cons b (cons c #nil)))</code> — a proper list.</p>
+<p><code>(a . b)</code> reads as <code>(cons a b)</code> — a pair.</p>
+<p><code>(a b . c)</code> reads as <code>(cons a (cons b c))</code> — an
+improper list.</p>
+<p>Dot notation in expression position is reader shorthand for
+<code>cons</code>, not a distinct expression form.</p>
+<h3 id="comments-1">13.5 Comments</h3>
+<p><code>;</code> begins a line comment (round surface). <code>//</code>
+begins a line comment (curly and spacy surfaces).</p>
+<p><code>#;</code> is a datum comment in all surfaces — it comments out
+the next complete expression:</p>
+<div class="sourceCode" id="cb51"><pre
+class="sourceCode scheme"><code class="sourceCode scheme"><span id="cb51-1"><a href="#cb51-1" aria-hidden="true" tabindex="-1"></a>(<span class="op">+</span> <span class="dv">1</span> <span class="co">#;(ignored)</span> <span class="dv">2</span>)   <span class="co">;; =&gt; 3</span></span></code></pre></div>
+<h2 id="foundations-and-base-library">14. Foundations and Base
+Library</h2>
+<p>The vocabulary of Möbius is organized by a single criterion:
+<strong>can it be written in Möbius?</strong></p>
+<p><strong>Foundations</strong> are forms and combiners that require the
+evaluator or runtime. They cannot be expressed as Möbius programs. Some
+foundations have equivalent expansions in terms of other foundations —
+<code>lambda</code> in terms of <code>gamma</code>, <code>and</code> in
+terms of <code>if</code>. These equivalences are semantic facts the
+compiler may exploit, not a hierarchy of dependence. The language
+<em>chooses</em> to present all of them as building blocks.</p>
+<p><strong>Base library</strong> combiners are Möbius programs. They
+have content hashes and live in the store. They are the first programs
+written in the language, shipped alongside it. Any programmer could
+write them.</p>
+<h3 id="foundations-2">14.1 Foundations</h3>
+<p><strong>Core forms</strong> (special evaluation rules):</p>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Foundation</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>gamma</code></td>
+<td>Tree destructuring, binding, catamorphism, combiner
+construction</td>
+</tr>
+<tr class="even">
+<td><code>if</code></td>
+<td>Conditional — only <code>#false</code> triggers the else branch</td>
+</tr>
+<tr class="odd">
+<td><code>and</code></td>
+<td>Short-circuit conjunction. Equivalent to nested <code>if</code>:
+<code>(and a b c)</code> =
+<code>(if a (if b c #false) #false)</code></td>
+</tr>
+<tr class="even">
+<td><code>or</code></td>
+<td>Short-circuit disjunction. Returns first non-<code>#false</code>
+value. Equivalent to nested <code>if</code> with temporary
+bindings.</td>
+</tr>
+<tr class="odd">
+<td><code>lambda</code></td>
+<td>Single-clause <code>gamma</code> with all-bind patterns.
+<code>(lambda (a b) body)</code> =
+<code>(gamma ((,a ,b) body))</code></td>
+</tr>
+<tr class="even">
+<td><code>begin</code></td>
+<td>Sequencing (round surface; braces in curly, indentation in
+spacy)</td>
+</tr>
+<tr class="odd">
+<td><code>define</code></td>
+<td>Bind a name (top-level: content hash; nested: local binding)</td>
+</tr>
+<tr class="even">
+<td><code>guard</code></td>
+<td>Install entry/exit gamma clauses on a continuation boundary</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Data construction and access:</strong></p>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Foundation</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>cons</code></td>
+<td>Construct a pair</td>
+</tr>
+<tr class="even">
+<td><code>car</code></td>
+<td>First element of a pair</td>
+</tr>
+<tr class="odd">
+<td><code>cdr</code></td>
+<td>Second element of a pair</td>
+</tr>
+<tr class="even">
+<td><code>encapsulation-type</code></td>
+<td>Create a capsule type from a 128-bit ID (constructor, predicate,
+accessor)</td>
+</tr>
+<tr class="odd">
+<td><code>box</code></td>
+<td>Create a mutable box</td>
+</tr>
+<tr class="even">
+<td><code>unbox</code></td>
+<td>Read box contents</td>
+</tr>
+<tr class="odd">
+<td><code>box!</code></td>
+<td>Mutate box contents</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Continuations:</strong></p>
+<table>
+<thead>
+<tr class="header">
+<th>Foundation</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>call/cc</code></td>
+<td>Reify the current continuation</td>
+</tr>
+<tr class="even">
+<td><code>continuation-apply</code></td>
+<td>Deliver a value to a captured continuation</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Type predicates:</strong></p>
+<table>
+<thead>
+<tr class="header">
+<th>Foundation</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>integer?</code></td>
+<td>Test if value is an integer</td>
+</tr>
+<tr class="even">
+<td><code>float?</code></td>
+<td>Test if value is a float</td>
+</tr>
+<tr class="odd">
+<td><code>char?</code></td>
+<td>Test if value is a character</td>
+</tr>
+<tr class="even">
+<td><code>string?</code></td>
+<td>Test if value is a string</td>
+</tr>
+<tr class="odd">
+<td><code>pair?</code></td>
+<td>Test if value is a pair</td>
+</tr>
+<tr class="even">
+<td><code>box?</code></td>
+<td>Test if value is a box</td>
+</tr>
+<tr class="odd">
+<td><code>combiner?</code></td>
+<td>Test if value is a combiner</td>
+</tr>
+<tr class="even">
+<td><code>continuation?</code></td>
+<td>Test if value is a continuation</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Comparison and arithmetic:</strong></p>
+<table>
+<thead>
+<tr class="header">
+<th>Foundation</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>eq?</code></td>
+<td>Identity comparison</td>
+</tr>
+<tr class="even">
+<td><code>+</code>, <code>-</code>, <code>*</code>, <code>/</code></td>
+<td>Arithmetic</td>
+</tr>
+<tr class="odd">
+<td><code>&lt;</code>, <code>&gt;</code>, <code>=</code></td>
+<td>Comparison</td>
+</tr>
+</tbody>
+</table>
+<p><strong>I/O:</strong></p>
+<table>
+<thead>
+<tr class="header">
+<th>Foundation</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>display</code></td>
+<td>Write a value to standard output. Returns <code>#void</code>.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Well-known bindings</strong> (values bound in the initial
+environment):</p>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Binding</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>continuation-exit</code></td>
+<td>The root continuation — delivers an exit code 0–255 to
+terminate</td>
+</tr>
+<tr class="even">
+<td><code>#true</code>, <code>#false</code>, <code>#nil</code>,
+<code>#void</code></td>
+<td>Pre-defined constants</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Foundation count:</strong> 8 core forms + 7 data + 2
+continuations + 8 type predicates + 8 arithmetic/comparison + 1 I/O =
+<strong>34 foundations</strong>.</p>
+<h3 id="base-library">14.2 Base library</h3>
+<p>Möbius programs shipped with the system. They have content hashes and
+live in the content store.</p>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Name</th>
+<th>Definition</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>list</code></td>
+<td><code>(gamma (,args args))</code></td>
+<td>Identity — returns the argument tree. <code>(list 1 2 3)</code>
+constructs <code>(1 . (2 . (3 . #nil)))</code> via the application rule
+and returns it unchanged.</td>
+</tr>
+<tr class="even">
+<td><code>not</code></td>
+<td><code>(gamma ((#false #true) (,_ #false)))</code></td>
+<td>Boolean negation</td>
+</tr>
+<tr class="odd">
+<td><code>equal?</code></td>
+<td>Recursive structural comparison using <code>gamma</code>,
+<code>pair?</code>, <code>eq?</code>, <code>car</code>,
+<code>cdr</code>, <code>unbox</code>, <code>box?</code>. Pairs compared
+element-wise. Capsules opaque (only <code>eq?</code>). Boxes compared by
+current contents.</td>
+<td>Deep equality</td>
+</tr>
+<tr class="even">
+<td><code>continuation-extend</code></td>
+<td>Built from <code>call/cc</code> and <code>continuation-apply</code>.
+Takes a continuation and a combiner, returns a new continuation such
+that delivering <code>v</code> applies <code>f</code> to <code>v</code>
+first, then delivers the result to <code>k</code>.</td>
+<td>Continuation composition</td>
+</tr>
+</tbody>
+</table>
+<p>Note on <code>eq?</code> vs <code>equal?</code>: <code>eq?</code>
+tests identity — whether two values are the same object. For atoms,
+<code>eq?</code> compares values. For pairs, <code>eq?</code> compares
+identity. For capsules, <code>eq?</code> compares identity. For boxes,
+<code>eq?</code> compares cell identity. <code>equal?</code> recurses
+through pairs and box contents. Capsules are opaque to
+<code>equal?</code> — two capsules are <code>equal?</code> only if they
+are <code>eq?</code>.</p>
+<h2 id="grammar">15. Grammar</h2>
+<h3 id="round-surface-grammar">15.1 Round surface grammar</h3>
+<pre class="bnf"><code>program     ::= expression*
+
+expression  ::= atom
+              | identifier
+              | (gamma clause+)
+              | (if expression expression expression)
+              | (begin expression+)
+              | (define identifier expression)
+              | (guard guard-body)
+              | (lambda formals expression)        ;; foundation
+              | (and expression+)                  ;; foundation
+              | (or expression+)                   ;; foundation
+              | (expression expression*)
+              
+clause      ::= (pattern expression)
+
+guard-body  ::= (entry clause*) (exit clause*) expression
+
+formals     ::= (identifier*)
+
+pattern     ::= atom                       ;; literal gamma
+              | ,identifier                ;; bind
+              | ,(identifier)              ;; recurse-and-bind
+              | ,_                         ;; wildcard
+              | (? identifier ,identifier) ;; predicate guard
+              | (pattern . pattern)        ;; pair
+              | (pattern*)                 ;; list (shorthand for nested pairs)
+
+atom        ::= integer | float | character | string | type-id
+
+integer     ::= [+-]? digit+
+float       ::= [+-]? digit+ &#39;.&#39; digit* ([eE] [+-]? digit+)?
+character   ::= &#39;#\&#39; (character-name | any-character)
+string      ::= &#39;&quot;&#39; string-char* &#39;&quot;&#39;
+type-id     ::= &#39;0x&#39; hex-digit+
+
+identifier  ::= symbol | hash-id
+symbol      ::= id-start id-continue*
+id-start    ::= alpha | &#39;+&#39; | &#39;-&#39; | &#39;*&#39; | &#39;/&#39; | &#39;&lt;&#39; | &#39;&gt;&#39; | &#39;=&#39; | &#39;?&#39; | &#39;!&#39; | &#39;_&#39;
+id-continue ::= (any character except whitespace and delimiters: ( ) { } ; : &#39; ` &quot; ,)
+hash-id     ::= &#39;#&#39; (alpha | digit | &#39;-&#39;)+</code></pre>
+<h3 id="curly-surface-grammar">15.2 Curly surface grammar</h3>
+<pre class="bnf"><code>program     ::= statement*
+
+statement   ::= define-stmt | expression &#39;;&#39;
+
+define-stmt ::= &#39;define&#39; identifier expression &#39;;&#39;
+              | &#39;define&#39; identifier gamma-expr &#39;;&#39;
+              | &#39;define&#39; identifier lambda-expr &#39;;&#39;
+
+expression  ::= atom
+              | identifier
+              | gamma-expr
+              | lambda-expr
+              | guard-expr
+              | identifier &#39;(&#39; args &#39;)&#39;           ;; application
+              | &#39;(&#39; expression op expression &#39;)&#39;  ;; infix
+              | &#39;if&#39; &#39;(&#39; expression &#39;)&#39; block
+                (&#39;else&#39; block)?
+              | &#39;{&#39; statement* expression &#39;}&#39;      ;; begin block
+
+gamma-expr  ::= &#39;gamma&#39; &#39;{&#39; case-clause+ &#39;}&#39;
+
+case-clause ::= &#39;case&#39; pattern &#39;:&#39; expression &#39;;&#39;
+              | &#39;case&#39; pattern &#39;:&#39; block &#39;;&#39;
+
+lambda-expr ::= &#39;lambda&#39; &#39;(&#39; identifier* &#39;)&#39; block
+
+guard-expr  ::= &#39;guard&#39; &#39;{&#39;
+                  &#39;entry&#39; &#39;:&#39; case-clause*
+                  &#39;exit&#39; &#39;:&#39; case-clause*
+                  &#39;body&#39; &#39;:&#39; expression &#39;;&#39;
+                &#39;}&#39;
+
+block       ::= &#39;{&#39; statement* expression &#39;}&#39;
+
+args        ::= expression*
+
+op          ::= &#39;+&#39; | &#39;-&#39; | &#39;*&#39; | &#39;/&#39; | &#39;&lt;&#39; | &#39;&gt;&#39; | &#39;=&#39;
+              | identifier                        ;; any combiner as infix
+
+pattern     ::= (same as round — §15.1)</code></pre>
+<h3 id="spacy-surface-grammar">15.3 Spacy surface grammar</h3>
+<pre class="bnf"><code>program     ::= line*
+
+line        ::= define-line | expression
+
+define-line ::= &#39;define&#39; identifier &#39;:&#39; expression
+              | &#39;define&#39; identifier &#39;:&#39; gamma-block
+              | &#39;define&#39; identifier &#39;:&#39; lambda-line
+
+expression  ::= atom
+              | identifier
+              | identifier &#39;(&#39; args &#39;)&#39;           ;; application
+              | &#39;(&#39; expression op expression &#39;)&#39;  ;; infix
+              | if-expr
+
+gamma-block ::= &#39;gamma&#39; &#39;:&#39; INDENT case-line+ DEDENT
+
+case-line   ::= &#39;case&#39; pattern &#39;:&#39; expression
+              | &#39;case&#39; pattern &#39;:&#39; INDENT line+ DEDENT
+
+lambda-line ::= &#39;lambda&#39; &#39;(&#39; identifier* &#39;)&#39; &#39;:&#39; expression
+
+guard-block ::= &#39;guard&#39; &#39;:&#39; INDENT
+                  &#39;entry&#39; &#39;:&#39; INDENT case-line* DEDENT
+                  &#39;exit&#39; &#39;:&#39; INDENT case-line* DEDENT
+                  &#39;body&#39; &#39;:&#39; expression
+                DEDENT
+
+if-expr     ::= &#39;if&#39; &#39;(&#39; expression &#39;)&#39; &#39;:&#39; INDENT
+                  line+ DEDENT
+                &#39;else&#39; &#39;:&#39; INDENT line+ DEDENT
+
+args        ::= expression*
+
+op          ::= (same as curly — §15.2)
+
+pattern     ::= (same as round — §15.1)
+
+INDENT      ::= (increase in indentation level)
+DEDENT      ::= (decrease in indentation level)</code></pre>
+<p>Note: anonymous lambda/gamma as arguments is not supported in any
+surface. Use a named <code>define</code> instead.</p>
+<h2 id="open-questions">16. Open Questions</h2>
+<p>The following are identified for future revisions:</p>
+<ol type="1">
+<li><p><strong>Predicate inference.</strong> The compiler infers
+predicates from known properties of foundations — <code>car</code>
+requires <code>pair?</code>, <code>+</code> requires
+<code>integer?</code> or <code>float?</code>. Gamma clause structure
+propagates these predicates. The programmer may add assert hints. The
+formal specification of the inference mechanism, the set of foundation
+predicate signatures, and the interaction between capsule-level
+inference and tree-level predicates remain to be detailed.</p></li>
+<li><p><strong>Effects.</strong> Effects in Möbius are named patterns
+over existing continuation foundations, not new foundations.
+<code>raise</code> (one-shot, no resumption),
+<code>raise-continuable</code> (one-shot resumption), and coroutines
+(multi-shot, sequential resumption) are defined in terms of
+<code>guard</code>, <code>call/cc</code>,
+<code>continuation-apply</code>, and <code>gamma</code>. The compiler
+recognizes these named patterns and optimizes accordingly:
+<code>raise</code> compiles to a jump, <code>raise-continuable</code> to
+a call, coroutines to stack switching. The formal definitions remain to
+be specified.</p></li>
+<li><p><strong>eval semantics.</strong> Without symbols as values and
+without quote, <code>eval</code> in the traditional Lisp sense is not
+possible. What remains is hash lookup: given a content hash, retrieve
+and execute the corresponding combiner from the content store. Open
+questions: Is this a foundation, or is it implicit in application? What
+happens when a hash is not in the content store?</p></li>
+<li><p><strong>Error model.</strong> What happens when a gamma fails (no
+clause matches)? When <code>car</code> is applied to an atom? When
+division by zero occurs? The spec needs to define: what an error value
+is (likely a capsule), how errors are raised (likely via
+<code>continuation-apply</code> to the nearest guard), and how they
+interact with <code>guard</code>. This is critical for
+implementers.</p></li>
+<li><p><strong>Registry representation.</strong> How is the registry
+represented and stored? How are registries versioned — append-only logs,
+content-addressed snapshots, or both? How do multiple registries
+compose? How are multilingual name bindings managed? Registry modes:
+local-only, federated, centralized.</p></li>
+<li><p><strong>Concurrency.</strong> Möbius’s tree-in-tree-out model and
+immutable content store are natural fits for concurrent and distributed
+computation. CSP-style channels (read-channel, write-channel, select)
+are a candidate model. The interaction between concurrency, boxes, and
+continuations needs careful specification.</p></li>
+<li><p><strong>Cycle detection for equal? on boxes.</strong>
+Self-referential boxes are permitted. <code>equal?</code> on cyclic box
+structures is currently undefined behavior. Should implementations be
+required to detect cycles?</p></li>
+<li><p><strong>I/O model.</strong> <code>display</code> is a foundation
+but I/O is otherwise unspecified. How do file handles, network sockets,
+and other resources interact with the content-addressed model? Are they
+capsules wrapping OS handles?</p></li>
+</ol>
+<h2 id="interpreter-milestones">17. Interpreter Milestones</h2>
+<p>The möbius-zero interpreter should be built in phases:</p>
+<p><strong>Phase 1 — Minimal gamma.</strong> Round reader
+(S-expressions). Values: atoms (including 128-bit type identifiers),
+pairs, empty list, booleans, <code>#void</code>, combiners.
+<code>gamma</code> with: literal, <code>,x</code> bind, pair pattern,
+list pattern, <code>,_</code> wildcard, predicate guard
+<code>(? pred ,x)</code>. Foundations: <code>define</code>,
+<code>if</code>, <code>and</code>, <code>or</code>, <code>lambda</code>,
+<code>begin</code>, <code>cons</code>, <code>car</code>,
+<code>cdr</code>, <code>eq?</code>, arithmetic, comparison, type
+predicates (<code>integer?</code>, <code>float?</code>,
+<code>pair?</code>, <code>string?</code>, <code>char?</code>),
+<code>display</code>. Base library: <code>list</code>, <code>not</code>.
+Application rule per §6.1. Left-to-right evaluation. No bare identifiers
+in patterns (rejected at registration). Registrar bundles mutually
+recursive definitions.</p>
+<p><strong>Phase 2 — Recursion.</strong> Catamorphic <code>,(x)</code>
+in gamma patterns. Nested <code>define</code> with mutual visibility
+within a body.</p>
+<p><strong>Phase 3 — Abstraction.</strong>
+<code>encapsulation-type</code> with 128-bit identifiers. Capsule
+constructor, predicate, accessor. Non-generative types. Explicit
+decapsulation before matching.</p>
+<p><strong>Phase 4 — Mutation.</strong> <code>box</code>,
+<code>unbox</code>, <code>box!</code>. Forbidden at top level.
+Runtime-only. Type predicates: <code>box?</code>,
+<code>combiner?</code>, <code>continuation?</code>. Base library:
+<code>equal?</code>.</p>
+<p><strong>Phase 5 — Control.</strong> <code>call/cc</code>,
+<code>continuation-apply</code>, <code>guard</code> with entry/exit
+clauses. <code>continuation-exit</code> as root continuation. Base
+library: <code>continuation-extend</code>.</p>
+<p><strong>Phase 6 — Surfaces.</strong> Curly reader. Spacy reader.
+Surface declaration (<code>#lang</code>). All three readers produce
+identical trees. Verify hash equivalence across surfaces.</p>
+<hr />
+<p><em>This document records the design of Möbius as understood in
+February 2026. It is a working specification, not a final standard. The
+“0” in R0RM reflects this: it is the revision before revision, the seed
+before the tree.</em></p>
+<hr />
+<h1 id="annexes">Annexes</h1>
+<p><em>Non-normative — possible future additions and compiler
+notes</em></p>
+<h2 id="annex-a.-ellipsis-possible-future-addition">Annex A. Ellipsis
+(Possible Future Addition)</h2>
+<p>The ellipsis <code>...</code> in a pattern would mean “zero or more
+repetitions of the preceding sub-pattern.” Each <code>...</code> would
+add one depth level to the bindings it contains. In the body,
+<code>...</code> would expand those bindings at the corresponding depth.
+This section sketches the design; it is not part of the current
+language.</p>
+<h3 id="a.1-basic-iteration-depth-1">A.1 Basic iteration — depth 1</h3>
+<div class="sourceCode" id="cb55"><pre
+class="sourceCode scheme"><code class="sourceCode scheme"><span id="cb55-1"><a href="#cb55-1" aria-hidden="true" tabindex="-1"></a><span class="co">;; collect all elements</span></span>
+<span id="cb55-2"><a href="#cb55-2" aria-hidden="true" tabindex="-1"></a>((gamma ((,a <span class="op">...</span>) (,a <span class="op">...</span>)))</span>
+<span id="cb55-3"><a href="#cb55-3" aria-hidden="true" tabindex="-1"></a> (<span class="kw">list</span> <span class="dv">1</span> <span class="dv">2</span> <span class="dv">3</span>))</span>
+<span id="cb55-4"><a href="#cb55-4" aria-hidden="true" tabindex="-1"></a><span class="co">;; =&gt; (1 2 3)</span></span>
+<span id="cb55-5"><a href="#cb55-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb55-6"><a href="#cb55-6" aria-hidden="true" tabindex="-1"></a><span class="co">;; transform each element</span></span>
+<span id="cb55-7"><a href="#cb55-7" aria-hidden="true" tabindex="-1"></a>((gamma ((,a <span class="op">...</span>) ((<span class="op">*</span> <span class="dv">2</span> a) <span class="op">...</span>)))</span>
+<span id="cb55-8"><a href="#cb55-8" aria-hidden="true" tabindex="-1"></a> (<span class="kw">list</span> <span class="dv">1</span> <span class="dv">2</span> <span class="dv">3</span>))</span>
+<span id="cb55-9"><a href="#cb55-9" aria-hidden="true" tabindex="-1"></a><span class="co">;; =&gt; (2 4 6)</span></span></code></pre></div>
+<p><code>a</code> is bound at depth 1. In the body,
+<code>(* 2 a) ...</code> iterates over <code>a</code>.</p>
+<h3 id="a.2-parallel-bindings">A.2 Parallel bindings</h3>
+<div class="sourceCode" id="cb56"><pre
+class="sourceCode scheme"><code class="sourceCode scheme"><span id="cb56-1"><a href="#cb56-1" aria-hidden="true" tabindex="-1"></a>((gamma (((,a ,b) <span class="op">...</span>) ((<span class="op">+</span> a b) <span class="op">...</span>)))</span>
+<span id="cb56-2"><a href="#cb56-2" aria-hidden="true" tabindex="-1"></a> (<span class="kw">list</span> (<span class="kw">list</span> <span class="dv">1</span> <span class="dv">10</span>) (<span class="kw">list</span> <span class="dv">2</span> <span class="dv">20</span>) (<span class="kw">list</span> <span class="dv">3</span> <span class="dv">30</span>)))</span>
+<span id="cb56-3"><a href="#cb56-3" aria-hidden="true" tabindex="-1"></a><span class="co">;; =&gt; (11 22 33)</span></span></code></pre></div>
+<p>Mismatched lengths are an error.</p>
+<h3 id="a.3-nested-ellipsis-depth-2">A.3 Nested ellipsis — depth 2</h3>
+<div class="sourceCode" id="cb57"><pre
+class="sourceCode scheme"><code class="sourceCode scheme"><span id="cb57-1"><a href="#cb57-1" aria-hidden="true" tabindex="-1"></a><span class="co">;; flatten a list of lists</span></span>
+<span id="cb57-2"><a href="#cb57-2" aria-hidden="true" tabindex="-1"></a>((gamma (((,a <span class="op">...</span>) <span class="op">...</span>) (,a <span class="op">...</span> <span class="op">...</span>)))</span>
+<span id="cb57-3"><a href="#cb57-3" aria-hidden="true" tabindex="-1"></a> (<span class="kw">list</span> (<span class="kw">list</span> <span class="dv">1</span> <span class="dv">2</span>) (<span class="kw">list</span> <span class="dv">3</span> <span class="dv">4</span>) (<span class="kw">list</span> <span class="dv">5</span> <span class="dv">6</span>)))</span>
+<span id="cb57-4"><a href="#cb57-4" aria-hidden="true" tabindex="-1"></a><span class="co">;; =&gt; (1 2 3 4 5 6)</span></span>
+<span id="cb57-5"><a href="#cb57-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb57-6"><a href="#cb57-6" aria-hidden="true" tabindex="-1"></a><span class="co">;; double every element, preserving structure</span></span>
+<span id="cb57-7"><a href="#cb57-7" aria-hidden="true" tabindex="-1"></a>((gamma (((,a <span class="op">...</span>) <span class="op">...</span>) (((<span class="op">*</span> <span class="dv">2</span> a) <span class="op">...</span>) <span class="op">...</span>)))</span>
+<span id="cb57-8"><a href="#cb57-8" aria-hidden="true" tabindex="-1"></a> (<span class="kw">list</span> (<span class="kw">list</span> <span class="dv">1</span> <span class="dv">2</span>) (<span class="kw">list</span> <span class="dv">3</span> <span class="dv">4</span>)))</span>
+<span id="cb57-9"><a href="#cb57-9" aria-hidden="true" tabindex="-1"></a><span class="co">;; =&gt; ((2 4) (6 8))</span></span>
+<span id="cb57-10"><a href="#cb57-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb57-11"><a href="#cb57-11" aria-hidden="true" tabindex="-1"></a><span class="co">;; double every element, then flatten</span></span>
+<span id="cb57-12"><a href="#cb57-12" aria-hidden="true" tabindex="-1"></a>((gamma (((,a <span class="op">...</span>) <span class="op">...</span>) ((<span class="op">*</span> <span class="dv">2</span> a) <span class="op">...</span> <span class="op">...</span>)))</span>
+<span id="cb57-13"><a href="#cb57-13" aria-hidden="true" tabindex="-1"></a> (<span class="kw">list</span> (<span class="kw">list</span> <span class="dv">1</span> <span class="dv">2</span>) (<span class="kw">list</span> <span class="dv">3</span> <span class="dv">4</span>)))</span>
+<span id="cb57-14"><a href="#cb57-14" aria-hidden="true" tabindex="-1"></a><span class="co">;; =&gt; (2 4 6 8)</span></span></code></pre></div>
+<h3 id="a.4-depth-rules">A.4 Depth rules</h3>
+<ul>
+<li>Each <code>...</code> in a pattern adds one depth level.</li>
+<li>In the body, each <code>...</code> consumes one depth level.</li>
+<li>A depth-0 binding under <code>...</code> is repeated at each
+iteration.</li>
+<li>Multiple bindings at the same depth must have the same length.</li>
+<li>Depth mismatch is an error.</li>
+</ul>
+<p><strong>Restrictions:</strong> <code>...</code> only at the tail of a
+list pattern. <code>(,a ... ,b)</code> is not allowed.
+<code>(,a ... . ,rest)</code> is not supported.</p>
+<p><strong>Interaction with catamorphism:</strong> Ellipsis and
+<code>,(x)</code> are orthogonal. They can appear in the same gamma.</p>
+<h2 id="annex-b.-predicate-driven-optimization">Annex B.
+Predicate-Driven Optimization</h2>
+<p>Predicate information drives compiler optimization:</p>
+<p><strong>Representation narrowing.</strong> A value satisfying
+<code>uint4?</code> needs only 4 bits.</p>
+<p><strong>Pointer tagging.</strong> Known predicate constraints free up
+tag bits.</p>
+<p><strong>Dead code elimination.</strong> Gamma clauses ruled out by
+predicates are unreachable.</p>
+<p><strong>Check elimination.</strong> Runtime checks implied by known
+predicates are redundant.</p>
+<p><strong>Specialization.</strong> Known predicates enable specialized
+code paths.</p>
+<h2 id="annex-c.-representation-inference">Annex C. Representation
+Inference</h2>
+<p>The only compositional data constructor is <code>cons</code>. The
+compiler infers optimal machine representations from predicate
+knowledge:</p>
+<p><strong>Byte vectors.</strong> A list of <code>uint8?</code> values
+with known length → contiguous bytes.</p>
+<p><strong>Arrays.</strong> Homogeneous known-length list → flat array
+with O(1) indexed access.</p>
+<p><strong>Structs.</strong> Fixed-position pair structure with known
+types → struct with fixed offsets.</p>
+<p><strong>Hash tables.</strong> Association list consistently accessed
+by key → amortized O(1) lookup.</p>
+<p>Capsules are the natural boundary where representation choices
+stabilize. The capsule’s opacity guarantees no external code depends on
+internal layout, freeing the compiler to change representations without
+breakage.</p>
+<h2 id="annex-d.-knowledge-economy">Annex D. Knowledge Economy</h2>
+<p><em>Reference: Aaron Hsu, “Programming Obesity: A Code Health
+Epidemic” (FnConf 2019)</em></p>
+<p>Hsu proposes three axes for evaluating programming systems:
+simplicity (structural complexity), speed (execution performance), and
+economy (how much knowledge scales to a broad set of problems).</p>
+<p>Economy is measured as the ratio of domain-specific names to total
+names in a program. Fewer unique concepts → less code → faster execution
+→ more knowledge reuse. These compound rather than trade off.</p>
+<p>Möbius is designed for high economy: one data type (tree), one
+mechanism (<code>gamma</code>), ~34 foundations. No frameworks, no DSLs,
+no separate type language. The programmer’s attention is spent on the
+domain problem, not on systems rumination.</p>
+<h2 id="annex-e.-abacus-an-arithmetic-evaluator">Annex E. Abacus — An
+Arithmetic Evaluator</h2>
+<p>This annex demonstrates catamorphic match on a concrete problem:
+evaluating arithmetic expression trees. The entire evaluator is one
+<code>gamma</code> with no explicit recursion.</p>
+<h3 id="e.1-representation">E.1 Representation</h3>
+<p>Expression trees use string tags as node labels:</p>
+<div class="sourceCode" id="cb58"><pre
+class="sourceCode scheme"><code class="sourceCode scheme"><span id="cb58-1"><a href="#cb58-1" aria-hidden="true" tabindex="-1"></a><span class="co">;; round</span></span>
+<span id="cb58-2"><a href="#cb58-2" aria-hidden="true" tabindex="-1"></a>(<span class="kw">list</span> <span class="st">&quot;add&quot;</span> <span class="dv">1</span> (<span class="kw">list</span> <span class="st">&quot;mul&quot;</span> <span class="dv">2</span> <span class="dv">3</span>))          <span class="co">;; 1 + (2 * 3) = 7</span></span>
+<span id="cb58-3"><a href="#cb58-3" aria-hidden="true" tabindex="-1"></a>(<span class="kw">list</span> <span class="st">&quot;sub&quot;</span> (<span class="kw">list</span> <span class="st">&quot;add&quot;</span> <span class="dv">10</span> <span class="dv">5</span>) <span class="dv">3</span>)         <span class="co">;; (10 + 5) - 3 = 12</span></span>
+<span id="cb58-4"><a href="#cb58-4" aria-hidden="true" tabindex="-1"></a>(<span class="kw">list</span> <span class="st">&quot;mul&quot;</span> (<span class="kw">list</span> <span class="st">&quot;add&quot;</span> <span class="dv">1</span> <span class="dv">2</span>) (<span class="kw">list</span> <span class="st">&quot;add&quot;</span> <span class="dv">3</span> <span class="dv">4</span>)) <span class="co">;; (1 + 2) * (3 + 4) = 21</span></span></code></pre></div>
+<p>A number is a leaf. A tagged list <code>("op" left right)</code> is a
+branch. This is a tree — <code>cons</code> all the way down.</p>
+<h3 id="e.2-the-evaluator">E.2 The evaluator</h3>
+<p><strong>Round:</strong></p>
+<div class="sourceCode" id="cb59"><pre
+class="sourceCode scheme"><code class="sourceCode scheme"><span id="cb59-1"><a href="#cb59-1" aria-hidden="true" tabindex="-1"></a>(<span class="ex">define</span><span class="fu"> abacus</span></span>
+<span id="cb59-2"><a href="#cb59-2" aria-hidden="true" tabindex="-1"></a>  (gamma ((<span class="op">?</span> <span class="kw">integer?</span> ,n) n)</span>
+<span id="cb59-3"><a href="#cb59-3" aria-hidden="true" tabindex="-1"></a>         ((<span class="st">&quot;add&quot;</span> ,(left) ,(right)) (<span class="op">+</span> left right))</span>
+<span id="cb59-4"><a href="#cb59-4" aria-hidden="true" tabindex="-1"></a>         ((<span class="st">&quot;sub&quot;</span> ,(left) ,(right)) (<span class="op">-</span> left right))</span>
+<span id="cb59-5"><a href="#cb59-5" aria-hidden="true" tabindex="-1"></a>         ((<span class="st">&quot;mul&quot;</span> ,(left) ,(right)) (<span class="op">*</span> left right))</span>
+<span id="cb59-6"><a href="#cb59-6" aria-hidden="true" tabindex="-1"></a>         ((<span class="st">&quot;div&quot;</span> ,(left) ,(right)) (<span class="op">/</span> left right))))</span>
+<span id="cb59-7"><a href="#cb59-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb59-8"><a href="#cb59-8" aria-hidden="true" tabindex="-1"></a>(abacus (<span class="kw">list</span> <span class="st">&quot;add&quot;</span> <span class="dv">1</span> (<span class="kw">list</span> <span class="st">&quot;mul&quot;</span> <span class="dv">2</span> <span class="dv">3</span>)))</span>
+<span id="cb59-9"><a href="#cb59-9" aria-hidden="true" tabindex="-1"></a><span class="co">;; =&gt; 7</span></span>
+<span id="cb59-10"><a href="#cb59-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb59-11"><a href="#cb59-11" aria-hidden="true" tabindex="-1"></a>(abacus (<span class="kw">list</span> <span class="st">&quot;mul&quot;</span> (<span class="kw">list</span> <span class="st">&quot;add&quot;</span> <span class="dv">1</span> <span class="dv">2</span>) (<span class="kw">list</span> <span class="st">&quot;add&quot;</span> <span class="dv">3</span> <span class="dv">4</span>)))</span>
+<span id="cb59-12"><a href="#cb59-12" aria-hidden="true" tabindex="-1"></a><span class="co">;; =&gt; 21</span></span></code></pre></div>
+<p><strong>Curly:</strong></p>
+<div class="sourceCode" id="cb60"><pre
+class="sourceCode javascript"><code class="sourceCode javascript"><span id="cb60-1"><a href="#cb60-1" aria-hidden="true" tabindex="-1"></a>define abacus gamma {</span>
+<span id="cb60-2"><a href="#cb60-2" aria-hidden="true" tabindex="-1"></a>    <span class="cf">case</span> (<span class="op">?</span> integer<span class="op">?</span> <span class="op">,</span>n)<span class="op">:</span> n<span class="op">;</span></span>
+<span id="cb60-3"><a href="#cb60-3" aria-hidden="true" tabindex="-1"></a>    <span class="cf">case</span> (<span class="st">&quot;add&quot;</span> <span class="op">,</span>(left) <span class="op">,</span>(right))<span class="op">:</span> (left <span class="op">+</span> right)<span class="op">;</span></span>
+<span id="cb60-4"><a href="#cb60-4" aria-hidden="true" tabindex="-1"></a>    <span class="cf">case</span> (<span class="st">&quot;sub&quot;</span> <span class="op">,</span>(left) <span class="op">,</span>(right))<span class="op">:</span> (left <span class="op">-</span> right)<span class="op">;</span></span>
+<span id="cb60-5"><a href="#cb60-5" aria-hidden="true" tabindex="-1"></a>    <span class="cf">case</span> (<span class="st">&quot;mul&quot;</span> <span class="op">,</span>(left) <span class="op">,</span>(right))<span class="op">:</span> (left <span class="op">*</span> right)<span class="op">;</span></span>
+<span id="cb60-6"><a href="#cb60-6" aria-hidden="true" tabindex="-1"></a>    <span class="cf">case</span> (<span class="st">&quot;div&quot;</span> <span class="op">,</span>(left) <span class="op">,</span>(right))<span class="op">:</span> (left <span class="op">/</span> right)<span class="op">;</span></span>
+<span id="cb60-7"><a href="#cb60-7" aria-hidden="true" tabindex="-1"></a>}<span class="op">;</span></span>
+<span id="cb60-8"><a href="#cb60-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb60-9"><a href="#cb60-9" aria-hidden="true" tabindex="-1"></a><span class="fu">abacus</span>(<span class="fu">list</span>(<span class="st">&quot;add&quot;</span> <span class="dv">1</span> <span class="fu">list</span>(<span class="st">&quot;mul&quot;</span> <span class="dv">2</span> <span class="dv">3</span>)))<span class="op">;</span></span>
+<span id="cb60-10"><a href="#cb60-10" aria-hidden="true" tabindex="-1"></a><span class="op">;;</span> <span class="kw">=&gt;</span> <span class="dv">7</span></span></code></pre></div>
+<p><strong>Spacy:</strong></p>
+<div class="sourceCode" id="cb61"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb61-1"><a href="#cb61-1" aria-hidden="true" tabindex="-1"></a>define abacus: gamma:</span>
+<span id="cb61-2"><a href="#cb61-2" aria-hidden="true" tabindex="-1"></a>    case (? integer? ,n): n</span>
+<span id="cb61-3"><a href="#cb61-3" aria-hidden="true" tabindex="-1"></a>    case (<span class="st">&quot;add&quot;</span> ,(left) ,(right)): (left <span class="op">+</span> right)</span>
+<span id="cb61-4"><a href="#cb61-4" aria-hidden="true" tabindex="-1"></a>    case (<span class="st">&quot;sub&quot;</span> ,(left) ,(right)): (left <span class="op">-</span> right)</span>
+<span id="cb61-5"><a href="#cb61-5" aria-hidden="true" tabindex="-1"></a>    case (<span class="st">&quot;mul&quot;</span> ,(left) ,(right)): (left <span class="op">*</span> right)</span>
+<span id="cb61-6"><a href="#cb61-6" aria-hidden="true" tabindex="-1"></a>    case (<span class="st">&quot;div&quot;</span> ,(left) ,(right)): (left <span class="op">/</span> right)</span>
+<span id="cb61-7"><a href="#cb61-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb61-8"><a href="#cb61-8" aria-hidden="true" tabindex="-1"></a>abacus(<span class="bu">list</span>(<span class="st">&quot;add&quot;</span> <span class="dv">1</span> <span class="bu">list</span>(<span class="st">&quot;mul&quot;</span> <span class="dv">2</span> <span class="dv">3</span>)))</span>
+<span id="cb61-9"><a href="#cb61-9" aria-hidden="true" tabindex="-1"></a><span class="op">;;</span> <span class="op">=&gt;</span> <span class="dv">7</span></span></code></pre></div>
+<h3 id="e.3-how-it-works">E.3 How it works</h3>
+<p>The key is <code>,(left)</code> and <code>,(right)</code>. These are
+catamorphic binds — before the body runs, <code>abacus</code> is applied
+recursively to each subtree.</p>
+<p>Trace of <code>(abacus (list "add" 1 (list "mul" 2 3)))</code>:</p>
+<ol type="1">
+<li>Input matches <code>("add" ,(left) ,(right))</code>.</li>
+<li><code>left</code>: apply <code>abacus</code> to <code>1</code>.
+Matches <code>(? integer? ,n)</code>. Returns <code>1</code>.</li>
+<li><code>right</code>: apply <code>abacus</code> to
+<code>("mul" 2 3)</code>. Matches <code>("mul" ,(left) ,(right))</code>.
+<ul>
+<li><code>left</code>: apply <code>abacus</code> to <code>2</code>.
+Returns <code>2</code>.</li>
+<li><code>right</code>: apply <code>abacus</code> to <code>3</code>.
+Returns <code>3</code>.</li>
+<li>Body: <code>(* 2 3)</code> → <code>6</code>.</li>
+</ul></li>
+<li>Body: <code>(+ 1 6)</code> → <code>7</code>.</li>
+</ol>
+<p>The programmer writes no recursive calls. The fold is declared in the
+pattern. The body only sees already-computed values.</p>
+<h3 id="e.4-extending-the-evaluator">E.4 Extending the evaluator</h3>
+<p>Adding negation — a unary operation:</p>
+<p><strong>Round:</strong></p>
+<div class="sourceCode" id="cb62"><pre
+class="sourceCode scheme"><code class="sourceCode scheme"><span id="cb62-1"><a href="#cb62-1" aria-hidden="true" tabindex="-1"></a>(<span class="ex">define</span><span class="fu"> abacus</span></span>
+<span id="cb62-2"><a href="#cb62-2" aria-hidden="true" tabindex="-1"></a>  (gamma ((<span class="op">?</span> <span class="kw">integer?</span> ,n) n)</span>
+<span id="cb62-3"><a href="#cb62-3" aria-hidden="true" tabindex="-1"></a>         ((<span class="st">&quot;add&quot;</span> ,(left) ,(right)) (<span class="op">+</span> left right))</span>
+<span id="cb62-4"><a href="#cb62-4" aria-hidden="true" tabindex="-1"></a>         ((<span class="st">&quot;sub&quot;</span> ,(left) ,(right)) (<span class="op">-</span> left right))</span>
+<span id="cb62-5"><a href="#cb62-5" aria-hidden="true" tabindex="-1"></a>         ((<span class="st">&quot;mul&quot;</span> ,(left) ,(right)) (<span class="op">*</span> left right))</span>
+<span id="cb62-6"><a href="#cb62-6" aria-hidden="true" tabindex="-1"></a>         ((<span class="st">&quot;div&quot;</span> ,(left) ,(right)) (<span class="op">/</span> left right))</span>
+<span id="cb62-7"><a href="#cb62-7" aria-hidden="true" tabindex="-1"></a>         ((<span class="st">&quot;neg&quot;</span> ,(inner))         (<span class="op">-</span> <span class="dv">0</span> inner))))</span>
+<span id="cb62-8"><a href="#cb62-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb62-9"><a href="#cb62-9" aria-hidden="true" tabindex="-1"></a>(abacus (<span class="kw">list</span> <span class="st">&quot;neg&quot;</span> (<span class="kw">list</span> <span class="st">&quot;add&quot;</span> <span class="dv">1</span> <span class="dv">2</span>)))</span>
+<span id="cb62-10"><a href="#cb62-10" aria-hidden="true" tabindex="-1"></a><span class="co">;; =&gt; -3</span></span></code></pre></div>
+<p>Each new operation is one clause. The catamorphism handles the
+recursion automatically — <code>,(inner)</code> evaluates the subtree
+before the body sees it.</p>
+<h3 id="e.5-what-this-demonstrates">E.5 What this demonstrates</h3>
+<ul>
+<li><strong>One mechanism.</strong> <code>gamma</code> handles dispatch,
+destructuring, recursion, and result construction. No visitor pattern,
+no interpreter loop, no recursive function definition.</li>
+<li><strong>The pattern is the program.</strong> The shape of the clause
+<em>is</em> the specification of what the evaluator does. Reading the
+pattern tells you the input structure; reading the body tells you the
+output.</li>
+<li><strong>Catamorphism terminates.</strong> Because <code>,(x)</code>
+only recurses into strict sub-parts of the matched value, the evaluator
+terminates on any finite expression tree. This is a structural
+guarantee, not a proof obligation.</li>
+<li><strong>Economy.</strong> The evaluator uses 6 names from Möbius
+(<code>gamma</code>, <code>integer?</code>, <code>+</code>,
+<code>-</code>, <code>*</code>, <code>/</code>) and 5 from the domain
+(<code>"add"</code>, <code>"sub"</code>, <code>"mul"</code>,
+<code>"div"</code>, <code>"neg"</code>). Half the program is the
+problem; half is the tool.</li>
+</ul>
