@@ -18,7 +18,7 @@ in the pattern.
 
 **English — curly:**
 
-```
+```javascript
 define abacus gamma {
     case (? integer? ,n): n;
     case ("add" ,(left) ,(right)): (left + right);
@@ -33,7 +33,7 @@ abacus(list("add" 1 list("mul" 2 3)));
 
 **Español — spacy:**
 
-```
+```python
 define ábaco: gamma:
     case (? entero? ,n): n
     case ("suma" ,(izquierda) ,(derecha)): (izquierda + derecha)
