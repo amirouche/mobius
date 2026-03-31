@@ -1,12 +1,24 @@
----
-header-includes: | 
-    ```{=latex}
-    \usepackage{realscripts}
-    ``` 
----
 # R0RM — Revised0 Report on Möbius
 
-*Draft 4 — February 2026*
+*Draft 5 — February 2026*
+
+## Prelude: Changes from Draft 4
+
+- **`match` renamed to `gamma`.** The core mechanism is now called `gamma`, reflecting its role as the sole combiner constructor. All sections, examples, and grammar updated.
+- **Quote and quasiquote removed.** `quote`, `quasiquote`, `unquote`, `unquote-splicing` eliminated from all surfaces, foundations, and grammar. All data construction through `cons` and the `list` library function.
+- **Anonymous combiners forbidden in all surfaces.** Every `gamma` or `lambda` must be named via `define`. This constraint — motivated by spacy's inability to delimit inline anonymous combiners — is now universal to maintain surface equivalence.
+- **Two-tier vocabulary: foundations and base library.** The vocabulary is organized by a single criterion: can it be written in Möbius? Foundations (~34) require the evaluator or runtime. Base library combiners are Möbius programs with content hashes. The terms "primitive", "sugar", and "registration-time form" are retired.
+- **Foundations are not irreducible.** Some foundations have equivalent expansions in terms of others (`lambda` in terms of `gamma`, `and` in terms of `if`). These are semantic equivalences the compiler may exploit, not a hierarchy.
+- **Capsule types use non-generative identifiers.** `encapsulation-type` takes an integer smaller than 2¹²⁸. Same identifier anywhere = same type. Library combiners `capsule-constructor`, `capsule-predicate`, `capsule-unwrap` simplify the common pattern.
+- **Type predicates are foundations.** `integer?`, `float?`, `char?`, `string?`, `pair?`, `box?`, `combiner?`, `continuation?` are explicit foundations.
+- **`display` is a foundation** (requires OS interaction). `equal?`, `not`, `continuation-extend` are base library.
+- **Truthiness clarified.** Only `#false` is false. `0`, `#nil`, `""`, `#void` are all true. `or` returns first non-`#false` value.
+- **`#void` and `#eof` are pre-defined singletons.**
+- **Hex integer literals.** `0xC0FF33` is valid reader syntax for positive integers.
+- **Comment syntax per surface.** Round: `;`. Curly: `//`. Spacy: `#`. All surfaces support `#;` datum comments.
+- **Mutual recursion moved to open questions.** Top-level mutually recursive definitions are not yet supported. The design of registrar bundling is deferred.
+- **`error` added to base library.** Takes exit code, message, and a tree.
+- **Interpreter milestones section removed** (implementation details, not specification).
 
 ## 0. Executive Summary
 
@@ -68,7 +80,7 @@ Registration converts surface syntax into content-addressed form:
 
 After registration, the original names are gone from the content. Only hashes remain.
 
-The registrar detects mutually recursive top-level definitions and bundles them into a single content-addressed unit. The dependency DAG is between these units, not between individual definitions (§7.3).
+The dependency graph between top-level definitions is strictly a directed acyclic graph. Definition A may reference definition B only if B is already registered. Top-level mutually recursive definitions are not yet supported (§16).
 
 Note: the reader and the registration pipeline may internally represent names as symbols. Symbols are an implementation detail of the toolchain, not a user-visible value type. The constraint "no symbols as values" applies to the content store and to runtime, not to intermediate representations.
 
@@ -76,7 +88,7 @@ Note: the reader and the registration pipeline may internally represent names as
 
 A combiner in the content store is a tree containing:
 
-- **Atoms**: integers, floats, characters, strings, 128-bit type identifiers — self-hashing.
+- **Atoms**: integers, floats, characters, strings — self-hashing.
 - **Pairs**: structure — hash is computed from the hashes of car and cdr.
 - **Hash references**: pointers to other content (foundations, constants, other combiners).
 - **Bound variables**: positions introduced by patterns and used within the same combiner.
@@ -101,7 +113,7 @@ All values in Möbius are trees. There are eight categories:
 
 **The void value.** `#void` is a pre-defined singleton. It is the conventional return value of side-effecting operations like `box!` and `display`. `#void` is true (it is not `#false`).
 
-**Capsules.** An opaque value tagged with a 128-bit type identifier (§9). Two trees with identical structure but wrapped in different capsule types are distinct.
+**Capsules.** An opaque value tagged with an integer smaller than 2¹²⁸ serving as a type identifier (§9). Two trees with identical structure but wrapped in different capsule types are distinct.
 
 **Combiners.** The result of evaluating a `gamma` or `lambda` expression. A combiner is a tree that, when applied, receives a tree and produces a tree.
 
@@ -182,32 +194,32 @@ Curly uses braces and semicolons. Infix arithmetic with mandatory full parenthes
 ```javascript
 #lang curly
 
-;; constants
+// constants
 define pi 3.14;
 
-;; combiners with lambda
+// combiners with lambda
 define double lambda (x) { (x * 2) };
 
-;; combiners with gamma
+// combiners with gamma
 define sum gamma {
     case (,head . ,(tail)): (head + tail);
     case #nil: 0;
 };
 
-;; application — space-separated arguments, no commas
+// application — space-separated arguments, no commas
 sum(list(1 2 3));
 
-;; conditional
+// conditional
 if (x > 0) { (x + 1) } else { (x - 1) };
 
-;; sequencing — braces + semicolons
+// sequencing — braces + semicolons
 {
     display("hello");
     display("world");
     42
 };
 
-;; multi-expression case bodies
+// multi-expression case bodies
 define foo gamma {
     case (,x ,y): {
         define z (x + y);
@@ -233,27 +245,27 @@ Spacy uses indentation and colons. Infix arithmetic with mandatory full parenthe
 ```python
 #lang spacy
 
-;; constants
+# constants
 define pi: 3.14
 
-;; combiners with lambda
+# combiners with lambda
 define double: lambda (x): (x * 2)
 
-;; combiners with gamma
+# combiners with gamma
 define sum: gamma:
     case (,head . ,(tail)): (head + tail)
     case #nil: 0
 
-;; application — space-separated arguments
+# application — space-separated arguments
 sum(list(1 2 3))
 
-;; conditional
+# conditional
 if (x > 0):
     (x + 1)
 else:
     (x - 1)
 
-;; sequencing — newlines under same indentation
+# sequencing — newlines under same indentation
 define foo: gamma:
     case (,x ,y):
         define z: (x + y)
@@ -281,24 +293,28 @@ The same lexer rule applies to all three surfaces:
 
 This means the full Lisp identifier set is available in all surfaces: `list->string`, `ab-cd`, `zero?`, `box!`, `pair-of?` are all single tokens everywhere.
 
-```
+```scheme
 ;; round
 (list->string my-list)
+```
 
-;; curly
+```javascript
+// curly
 list->string(my-list);
+```
 
-;; spacy
+```python
+# spacy
 list->string(my-list)
 ```
 
 The mandatory parenthesization rule (§6.4) ensures infix expressions are unambiguous. Inside `(a op b)`, three space-separated tokens are parsed as infix. Outside of parenthesized infix, identifiers like `ab-cd` are never split — the lexer reads greedily until a delimiter.
 
 ```javascript
-;; curly
-(ab-cd + ef-gh)          ;; infix: three tokens, + is the operator
-ab-cd                    ;; one identifier
-map(list->string xs);    ;; application: two arguments
+// curly
+(ab-cd + ef-gh)          // infix: three tokens, + is the operator
+ab-cd                    // one identifier
+map(list->string xs);    // application: two arguments
 ```
 
 No surface restricts the identifier character set. No underscore translation. No registry normalization across surfaces.
@@ -307,14 +323,18 @@ No surface restricts the identifier character set. No underscore translation. No
 
 All three surfaces use **space** as the argument separator. There are no commas between arguments in any surface.
 
-```
+```scheme
 ;; round
 (f 3 4 5)
+```
 
-;; curly
+```javascript
+// curly
 f(3 4 5);
+```
 
-;; spacy
+```python
+# spacy
 f(3 4 5)
 ```
 
@@ -324,14 +344,18 @@ Comma is reserved exclusively for pattern syntax: `,x` (bind), `,(x)` (catamorph
 
 The following three definitions register the same content hash:
 
-```
+```scheme
 ;; round
 (define add (gamma ((,a ,b) (+ a b))))
+```
 
-;; curly
+```javascript
+// curly
 define add gamma { case (,a ,b): (a + b) };
+```
 
-;; spacy
+```python
+# spacy
 define add: gamma:
     case (,a ,b): (a + b)
 ```
@@ -348,7 +372,7 @@ All three surfaces have identical capabilities. Any program written in one surfa
 
 **Curly:** `//` begins a line comment. `;` is a statement separator and cannot double as a comment marker.
 
-**Spacy:** `//` begins a line comment.
+**Spacy:** `#` begins a line comment.
 
 `#;` datum comments are available in all surfaces.
 
@@ -406,7 +430,7 @@ define sum gamma {
     case #nil: 0;
 };
 sum(list(1 2 3));
-;; => 6
+// => 6
 ```
 
 **Spacy:**
@@ -415,7 +439,7 @@ define sum: gamma:
     case (,head . ,(tail)): (head + tail)
     case #nil: 0
 sum(list(1 2 3))
-;; => 6
+# => 6
 ```
 
 Here `head` is bound to the raw car. `tail` is bound to the result of applying `sum` to the cdr. The fold is declared in the pattern, not the body.
@@ -472,14 +496,18 @@ Outside of patterns, comma has no syntactic role — it is **not** an argument s
 
 Tail matching uses dot notation:
 
-```
+```scheme
 ;; round
 (gamma ((,a ,b . ,rest) (list a b rest)))
+```
 
-;; curly
+```javascript
+// curly
 gamma { case (,a ,b . ,rest): list(a b rest) }
+```
 
-;; spacy
+```python
+# spacy
 gamma:
     case (,a ,b . ,rest): list(a b rest)
 ```
@@ -529,14 +557,18 @@ Every combiner takes one argument (a tree) and returns one value (a tree). There
 
 **`if`** evaluates `test`; if the result is `#false`, evaluates `else`; for any other value, evaluates `then`.
 
-```
+```scheme
 ;; round
 (if test then else)
+```
 
-;; curly
+```javascript
+// curly
 if (test) { then } else { else };
+```
 
-;; spacy
+```python
+# spacy
 if (test):
     then
 else:
@@ -567,12 +599,12 @@ Returns the first value that is not `#false`. If all are `#false`, returns `#fal
 
 In curly and spacy, infix expressions are fully parenthesized:
 
-```scheme
-;; curly/spacy
-(1 + 2)         ;; valid — reader produces (+ 1 2)
-(1 + (2 * 3))   ;; valid — reader produces (+ 1 (* 2 3))
-1 + 2            ;; READER ERROR — missing parentheses
-1 + 2 * 3        ;; READER ERROR — no precedence
+```javascript
+// curly/spacy
+(1 + 2)         // valid — reader produces (+ 1 2)
+(1 + (2 * 3))   // valid — reader produces (+ 1 (* 2 3))
+1 + 2            // READER ERROR — missing parentheses
+1 + 2 * 3        // READER ERROR — no precedence
 ```
 
 There is no operator precedence. Every infix expression must be explicitly parenthesized. The reader translates `(a op b)` to `(op a b)`, producing the same tree as round's prefix form.
@@ -580,8 +612,8 @@ There is no operator precedence. Every infix expression must be explicitly paren
 An identifier like `+` in argument position (not infix) is just a combiner value:
 
 ```javascript
-;; curly
-map(+ my-list);   ;; passes the combiner + as first arg to map
+// curly
+map(+ my-list);   // passes the combiner + as first arg to map
 ```
 
 ## 7. Define and Scope
@@ -612,46 +644,9 @@ In the stored form, `f` does not contain a free reference to `x`. It contains th
 
 ### 7.3 The dependency DAG
 
-The dependency graph between top-level definition **units** is strictly a directed acyclic graph. The registrar detects mutually recursive definitions and bundles them into a single content-addressed unit. The hash covers the entire mutual group.
+The dependency graph between top-level definitions is strictly a directed acyclic graph. Definition A may reference definition B only if B is already registered.
 
-**Round:**
-```scheme
-;; odd? and even? reference each other — the registrar bundles them
-(define odd? (gamma ((0 #false)
-                     (,n (even? (- n 1))))))
-(define even? (gamma ((0 #true)
-                      (,n (odd? (- n 1))))))
-```
-
-**Curly:**
-```javascript
-define odd? gamma {
-    case 0: #false;
-    case ,n: even?((n - 1));
-};
-define even? gamma {
-    case 0: #true;
-    case ,n: odd?((n - 1));
-};
-```
-
-**Spacy:**
-```python
-define odd?: gamma:
-    case 0: #false
-    case ,n: even?((n - 1))
-define even?: gamma:
-    case 0: #true
-    case ,n: odd?((n - 1))
-```
-
-**Stale references.** If the programmer later updates `odd?` without updating `even?`, the result is:
-
-```
-odd?₁ → even?₀ → odd?₀
-```
-
-This is a valid DAG — no structural problem. But it is a semantic bug: `even?₀` still calls the old `odd?₀`, not the new `odd?₁`. The content store faithfully preserves the stale reference. Tooling should warn about broken mutual groups, but the language does not forbid them.
+Top-level mutually recursive definitions are not yet supported. The design of registrar bundling is an open question (§16). Mutually recursive functions can be defined as local bindings within a single top-level combiner using nested `define` (§7.4).
 
 ### 7.4 Nested define
 
@@ -703,45 +698,49 @@ Lambda must always be explicit. There is no `(define (f x) body)` shorthand. If 
 
 ## 9. Capsules
 
-A capsule type is defined by a 128-bit type identifier. The foundation `encapsulation-type` takes this identifier and returns a tree of three combiners.
+A capsule type is defined by an integer smaller than 2¹²⁸ serving as a type identifier. The foundation `encapsulation-type` takes this integer and returns a tree of three combiners: a constructor, a predicate, and an accessor.
+
+The base library provides convenience combiners for extracting these (§14.2):
 
 **Round:**
 ```scheme
 (define my-type (encapsulation-type 0x9f3a7b2c4d5e6f708192a3b4c5d6e7f8))
-(define make-my (car my-type))
-(define my? (car (cdr my-type)))
-(define unwrap-my (car (cdr (cdr my-type))))
+(define make-my (capsule-constructor my-type))
+(define my? (capsule-predicate my-type))
+(define unwrap-my (capsule-unwrap my-type))
 ```
 
 **Curly:**
 ```javascript
 define my-type encapsulation-type(0x9f3a7b2c4d5e6f708192a3b4c5d6e7f8);
-define make-my car(my-type);
-define my? car(cdr(my-type));
-define unwrap-my car(cdr(cdr(my-type)));
+define make-my capsule-constructor(my-type);
+define my? capsule-predicate(my-type);
+define unwrap-my capsule-unwrap(my-type);
 ```
 
 **Spacy:**
 ```python
 define my-type: encapsulation-type(0x9f3a7b2c4d5e6f708192a3b4c5d6e7f8)
-define make-my: car(my-type)
-define my?: car(cdr(my-type))
-define unwrap-my: car(cdr(cdr(my-type)))
+define make-my: capsule-constructor(my-type)
+define my?: capsule-predicate(my-type)
+define unwrap-my: capsule-unwrap(my-type)
 ```
 
-**Constructor** (`car`): wraps any tree in an opaque capsule tagged with this type ID.
+**Constructor**: wraps any tree in an opaque capsule tagged with this type ID.
 
-**Predicate** (`car` of `cdr`): returns `#true` if a value is a capsule with this type ID, `#false` otherwise.
+**Predicate**: returns `#true` if a value is a capsule with this type ID, `#false` otherwise.
 
-**Accessor** (`car` of `cdr` of `cdr`): unwraps the capsule, returning the inner tree. Fails if the value does not have this type ID.
+**Accessor**: unwraps the capsule, returning the inner tree. Fails if the value does not have this type ID.
+
+The raw result of `encapsulation-type` is a tree `(constructor . (predicate . (accessor . #nil)))` — the library combiners are shorthand for `car`, `car` of `cdr`, and `car` of `cdr` of `cdr`.
 
 ### 9.1 Non-generative types
 
-Capsule types are **non-generative**: the same 128-bit identifier anywhere defines the same type. Two modules using the same ID have compatible types. Two modules using different IDs have incompatible types, even if structurally identical.
+Capsule types are **non-generative**: the same integer anywhere defines the same type. Two modules using the same ID have compatible types. Two modules using different IDs have incompatible types, even if structurally identical.
 
-The 128-bit identifier is an atom — it lives in the content store like any other data. There is no runtime generation of fresh types.
+The type identifier is an integer — it lives in the content store like any other data. There is no runtime generation of fresh types.
 
-**Collision.** Because type identifiers are chosen by the programmer, two unrelated capsule types may accidentally share the same ID. This is a bug, not a feature. Linting tools should detect duplicate type IDs across a codebase. The spec recommends deriving type IDs deterministically (e.g., from a hash of the defining module's content and a local name) rather than choosing them by hand.
+**Collision.** Because type identifiers are chosen by the programmer, two unrelated capsule types may accidentally share the same ID. This is a bug, not a feature. Linting tools should detect duplicate type IDs across a codebase. The question of how to derive type IDs safely is an open question (§16).
 
 ### 9.2 Capsules and predicates
 
@@ -763,14 +762,18 @@ Decapsulation is always explicit. Code must use the accessor to unwrap a capsule
 ;; round
 (gamma (((? my? ,x) (do-something (unwrap-my x)))
         (,other     (do-other other))))
+```
 
-;; curly
+```javascript
+// curly
 gamma {
     case (? my? ,x): do-something(unwrap-my(x));
     case ,other: do-other(other);
 }
+```
 
-;; spacy
+```python
+# spacy
 gamma:
     case (? my? ,x): do-something(unwrap-my(x))
     case ,other: do-other(other)
@@ -937,11 +940,15 @@ Delivering a value to `continuation-exit` terminates the program. The delivered 
 ```scheme
 ;; round
 (continuation-apply continuation-exit 0)   ;; exit successfully
+```
 
-;; curly
+```javascript
+// curly
 continuation-apply(continuation-exit 0);
+```
 
-;; spacy
+```python
+# spacy
 continuation-apply(continuation-exit 0)
 ```
 
@@ -955,7 +962,7 @@ The reader converts a character stream into trees. It is not part of the languag
 
 ### 13.1 Atoms
 
-**Integers.** A sequence of digits, optionally preceded by `-` or `+`. Examples: `42`, `-7`, `0`, `+3`.
+**Integers.** A sequence of digits, optionally preceded by `-` or `+`. Examples: `42`, `-7`, `0`, `+3`. Positive integers may also be written in hexadecimal with the `0x` prefix: `0xFF`, `0xC0FF33`, `0x9f3a7b2c4d5e6f708192a3b4c5d6e7f8`.
 
 **Floats.** Digits with a decimal point, optionally preceded by a sign, optionally followed by an exponent. Examples: `3.14`, `-0.5`, `1e10`, `2.5e-3`.
 
@@ -963,25 +970,19 @@ The reader converts a character stream into trees. It is not part of the languag
 
 **Strings.** Delimited by double quotes. Escape sequences: `\\`, `\"`, `\n`, `\t`, `\r`.
 
-**Type identifiers.** A 128-bit integer in hexadecimal with `0x` prefix. Example: `0x9f3a7b2c4d5e6f708192a3b4c5d6e7f8`.
-
 ### 13.2 Hash-identifiers
 
 A `#` followed by one or more alphanumeric characters or hyphens. Hash-identifiers are identifiers — resolved at registration time like symbols.
 
-Four are pre-defined:
+Five are pre-defined:
 
 - `#true` — the truthy value.
 - `#false` — the sole false value.
 - `#nil` — the empty list.
 - `#void` — the void singleton, returned by side-effecting operations.
+- `#eof` — the end-of-file singleton.
 
-All others are regular identifiers. By convention, a hash-identifier names a singleton:
-
-```scheme
-(define #eof-type (encapsulation-type 0x00000000000000000000000000000001))
-(define #eof ((car #eof-type) #nil))
-```
+All others are regular identifiers. By convention, a hash-identifier names a singleton.
 
 ### 13.3 Symbols (surface syntax only)
 
@@ -1003,7 +1004,7 @@ Dot notation in expression position is reader shorthand for `cons`, not a distin
 
 ### 13.5 Comments
 
-`;` begins a line comment (round surface). `//` begins a line comment (curly and spacy surfaces).
+`;` begins a line comment (round surface). `//` begins a line comment (curly surface). `#` begins a line comment (spacy surface).
 
 `#;` is a datum comment in all surfaces — it comments out the next complete expression:
 
@@ -1041,7 +1042,7 @@ The vocabulary of Möbius is organized by a single criterion: **can it be writte
 | `cons` | Construct a pair |
 | `car` | First element of a pair |
 | `cdr` | Second element of a pair |
-| `encapsulation-type` | Create a capsule type from a 128-bit ID (constructor, predicate, accessor) |
+| `encapsulation-type` | Create a capsule type from an integer < 2¹²⁸ (constructor, predicate, accessor) |
 | `box` | Create a mutable box |
 | `unbox` | Read box contents |
 | `box!` | Mutate box contents |
@@ -1085,7 +1086,7 @@ The vocabulary of Möbius is organized by a single criterion: **can it be writte
 | Binding | Role |
 |---|---|
 | `continuation-exit` | The root continuation — delivers an exit code 0–255 to terminate |
-| `#true`, `#false`, `#nil`, `#void` | Pre-defined constants |
+| `#true`, `#false`, `#nil`, `#void`, `#eof` | Pre-defined constants |
 
 **Foundation count:** 8 core forms + 7 data + 2 continuations + 8 type predicates + 8 arithmetic/comparison + 1 I/O = **34 foundations**.
 
@@ -1099,6 +1100,10 @@ Möbius programs shipped with the system. They have content hashes and live in t
 | `not` | `(gamma ((#false #true) (,_ #false)))` | Boolean negation |
 | `equal?` | Recursive structural comparison using `gamma`, `pair?`, `eq?`, `car`, `cdr`, `unbox`, `box?`. Pairs compared element-wise. Capsules opaque (only `eq?`). Boxes compared by current contents. | Deep equality |
 | `continuation-extend` | Built from `call/cc` and `continuation-apply`. Takes a continuation and a combiner, returns a new continuation such that delivering `v` applies `f` to `v` first, then delivers the result to `k`. | Continuation composition |
+| `capsule-constructor` | `(gamma ((,type) (car type)))` | Extract the constructor from an `encapsulation-type` result. |
+| `capsule-predicate` | `(gamma ((,type) (car (cdr type))))` | Extract the predicate from an `encapsulation-type` result. |
+| `capsule-unwrap` | `(gamma ((,type) (car (cdr (cdr type)))))` | Extract the accessor from an `encapsulation-type` result. |
+| `error` | Takes an exit code, a message string, and a tree. Displays the message and tree via `display`, then delivers the exit code to `continuation-exit`. | Error reporting and termination |
 
 Note on `eq?` vs `equal?`: `eq?` tests identity — whether two values are the same object. For atoms, `eq?` compares values. For pairs, `eq?` compares identity. For capsules, `eq?` compares identity. For boxes, `eq?` compares cell identity. `equal?` recurses through pairs and box contents. Capsules are opaque to `equal?` — two capsules are `equal?` only if they are `eq?`.
 
@@ -1135,13 +1140,13 @@ pattern     ::= atom                       ;; literal gamma
               | (pattern . pattern)        ;; pair
               | (pattern*)                 ;; list (shorthand for nested pairs)
 
-atom        ::= integer | float | character | string | type-id
+atom        ::= integer | float | character | string
 
 integer     ::= [+-]? digit+
+              |  '0x' hex-digit+
 float       ::= [+-]? digit+ '.' digit* ([eE] [+-]? digit+)?
 character   ::= '#\' (character-name | any-character)
 string      ::= '"' string-char* '"'
-type-id     ::= '0x' hex-digit+
 
 identifier  ::= symbol | hash-id
 symbol      ::= id-start id-continue*
@@ -1249,7 +1254,7 @@ The following are identified for future revisions:
 
 2. **Effects.** Effects in Möbius are named patterns over existing continuation foundations, not new foundations. `raise` (one-shot, no resumption), `raise-continuable` (one-shot resumption), and coroutines (multi-shot, sequential resumption) are defined in terms of `guard`, `call/cc`, `continuation-apply`, and `gamma`. The compiler recognizes these named patterns and optimizes accordingly: `raise` compiles to a jump, `raise-continuable` to a call, coroutines to stack switching. The formal definitions remain to be specified.
 
-3. **eval semantics.** Without symbols as values and without quote, `eval` in the traditional Lisp sense is not possible. What remains is hash lookup: given a content hash, retrieve and execute the corresponding combiner from the content store. Open questions: Is this a foundation, or is it implicit in application? What happens when a hash is not in the content store?
+3. **eval semantics.** Without symbols as values and without quote, `eval` in the traditional Lisp sense is not possible. What remains is hash lookup: given a content hash, retrieve and execute the corresponding combiner from the content store. A possible foundation `integer->combiner` would take a hash (an integer) and return the corresponding combiner. Open questions: Is this a foundation, or is it implicit in application? What happens when a hash is not in the content store? What are the security implications of arbitrary hash execution?
 
 4. **Error model.** What happens when a gamma fails (no clause matches)? When `car` is applied to an atom? When division by zero occurs? The spec needs to define: what an error value is (likely a capsule), how errors are raised (likely via `continuation-apply` to the nearest guard), and how they interact with `guard`. This is critical for implementers.
 
@@ -1261,21 +1266,9 @@ The following are identified for future revisions:
 
 8. **I/O model.** `display` is a foundation but I/O is otherwise unspecified. How do file handles, network sockets, and other resources interact with the content-addressed model? Are they capsules wrapping OS handles?
 
-## 17. Interpreter Milestones
+9. **Top-level mutual recursion.** How should the registrar handle mutually recursive top-level definitions? The registrar could detect mutual groups and bundle them into a single content-addressed unit whose hash covers the entire group. Open questions: How are stale references handled when one member is updated without the others? Should tooling warn about broken mutual groups? What is the interaction with the dependency DAG?
 
-The möbius-zero interpreter should be built in phases:
-
-**Phase 1 — Minimal gamma.** Round reader (S-expressions). Values: atoms (including 128-bit type identifiers), pairs, empty list, booleans, `#void`, combiners. `gamma` with: literal, `,x` bind, pair pattern, list pattern, `,_` wildcard, predicate guard `(? pred ,x)`. Foundations: `define`, `if`, `and`, `or`, `lambda`, `begin`, `cons`, `car`, `cdr`, `eq?`, arithmetic, comparison, type predicates (`integer?`, `float?`, `pair?`, `string?`, `char?`), `display`. Base library: `list`, `not`. Application rule per §6.1. Left-to-right evaluation. No bare identifiers in patterns (rejected at registration). Registrar bundles mutually recursive definitions.
-
-**Phase 2 — Recursion.** Catamorphic `,(x)` in gamma patterns. Nested `define` with mutual visibility within a body.
-
-**Phase 3 — Abstraction.** `encapsulation-type` with 128-bit identifiers. Capsule constructor, predicate, accessor. Non-generative types. Explicit decapsulation before matching.
-
-**Phase 4 — Mutation.** `box`, `unbox`, `box!`. Forbidden at top level. Runtime-only. Type predicates: `box?`, `combiner?`, `continuation?`. Base library: `equal?`.
-
-**Phase 5 — Control.** `call/cc`, `continuation-apply`, `guard` with entry/exit clauses. `continuation-exit` as root continuation. Base library: `continuation-extend`.
-
-**Phase 6 — Surfaces.** Curly reader. Spacy reader. Surface declaration (`#lang`). All three readers produce identical trees. Verify hash equivalence across surfaces.
+10. **Capsule type ID derivation.** How should programmers choose type identifiers to avoid collisions? Possible strategies include deriving IDs deterministically from a hash of the defining module's content and a local name, or using a registry of allocated IDs. The spec currently leaves this to the programmer. A recommended derivation scheme would reduce accidental collisions.
 
 -----
 
@@ -1432,7 +1425,7 @@ define abacus gamma {
 };
 
 abacus(list("add" 1 list("mul" 2 3)));
-;; => 7
+// => 7
 ```
 
 **Spacy:**
@@ -1445,7 +1438,7 @@ define abacus: gamma:
     case ("div" ,(left) ,(right)): (left / right)
 
 abacus(list("add" 1 list("mul" 2 3)))
-;; => 7
+# => 7
 ```
 
 ### E.3 How it works
