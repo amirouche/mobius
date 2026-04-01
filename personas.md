@@ -6,7 +6,7 @@
 
 ## Quick Map
 
-**Who arrives and why — the 16 personas:**
+**Who arrives and why — the 17 personas:**
 
 | # | Persona | What brings them |
 |---|---------|-----------------|
@@ -19,13 +19,14 @@
 | 7 | The Academic Researcher | Priority before publication, reproducibility is the hash |
 | 8 | The Independent Researcher | The hash *is* the institution |
 | 9 | The Community Steward | Collective knowledge, non-individual attribution |
-| 10 | The Person Who Was Stolen From | Grief, then recognition |
-| 11 | The Connector | Findability across difference |
-| 12 | The Educator | Lessons with traceable lineage |
-| 13 | The Artist | Demoscene, music, Blender — derivation as honor |
-| 14 | The Citizen | Illegibility of power, made auditable |
-| 15 | The Representative | Trust under complexity, decisions with traceable provenance |
-| 16 | The Symbiotic Artificial Intelligence | The commons as external memory, the hash as trust anchor |
+| 10 | The Privateer | Priority proof without disclosure |
+| 11 | The Person Who Was Stolen From | Grief, then recognition |
+| 12 | The Connector | Findability across difference |
+| 13 | The Educator | Lessons with traceable lineage |
+| 14 | The Artist | Demoscene, music, Blender — derivation as honor |
+| 15 | The Citizen | Illegibility of power, made auditable |
+| 16 | The Representative | Trust under complexity, decisions with traceable provenance |
+| 17 | The Symbiotic Artificial Intelligence | The commons as external memory, the hash as trust anchor |
 
 **What anyone can do once here — the 7 roles:**
 
@@ -88,11 +89,11 @@ In a garage lab, those two roles are often the same person. That's fine. The sep
 
 **Orientation:** Speaks multiple human languages. Codes in English because they have to, not because they want to. Feels the friction every day — naming things in a language that isn't theirs, reading documentation that assumes their cultural context, contributing to projects where their natural way of thinking is treated as a translation layer.
 
-**What lights up:** The multilingual registry. `"odd?" → 0x7a3f...` / `"impair?" → 0x7a3f...` / `"فردي؟" → 0x7a3f...`. Same hash. Same semantics. Their language isn't a skin on top of English — it's a first-class surface over shared structure.
+**What lights up:** Multilingual naming. `"odd?" → 0x7a3f...` / `"impair?" → 0x7a3f...` / `"فردي؟" → 0x7a3f...`. Same hash. Same semantics. Their language isn't a skin on top of English — it's a first-class surface over shared structure.
 
 **The pitch in their language:** "Name things in your language. Not as a translation. As an original. The semantics are the same because the hash is the same. Your surface is as real as any other."
 
-**Entry point:** The registry concept. They'll want to see a concrete example: define something, name it in their language, share the hash, have someone else map it to a different name in a different language, and watch it work.
+**Entry point:** The naming concept. They'll want to see a concrete example: define something, name it in their language, share the hash, have someone else map it to a different name in a different language, and watch it work.
 
 **What they'd miss:** The PL theory underneath. They don't care about catamorphisms — they care that they can think in Tamazight or Wolof or Vietnamese and the system doesn't punish them for it.
 
@@ -126,7 +127,7 @@ In a garage lab, those two roles are often the same person. That's fine. The sep
 
 **Entry point:** The name-centric workflow and the git comparison. They'll immediately understand the DAG vs. tree distinction. Then the sufficiently smart compiler — they'll recognize the trade-off (complexity in one place so it's not in every place).
 
-**What they'd miss:** The temps long stakes. They're solving their immediate pain. That's fine — the curb-cut effect means their adoption serves the larger vision whether or not they see it. Eventually they might notice the multilingual registry and think "huh, that's clever." That's the spore landing.
+**What they'd miss:** The temps long stakes. They're solving their immediate pain. That's fine — the curb-cut effect means their adoption serves the larger vision whether or not they see it. Eventually they might notice the multilingual naming and think "huh, that's clever." That's the spore landing.
 
 **What scares them:** Immaturity. "Can I actually use this for real work?" They need evidence of robustness, not vision. The answer is honest: not yet, but the architecture is sound and the seed interpreter is real.
 
@@ -140,7 +141,7 @@ In a garage lab, those two roles are often the same person. That's fine. The sep
 
 **The pitch in their language:** "LLMs absorbed the commons without preserving who made what. Content-addressing with timestamps rebuilds the lineage. The graph is the proof. Priority via timestamps, not dominance. This is infrastructure for commons construction in the post-extraction era."
 
-**Entry point:** The vision and temps long framing. Then the content-addressing mechanics to see *how* the vision is implemented, not just asserted. They'll care about the registry modes (local, federated, centralized) and the append-only semantics.
+**Entry point:** The vision and temps long framing. Then the content-addressing mechanics to see *how* the vision is implemented, not just asserted. They'll care about the store modes (local, federated, centralized) and the append-only semantics.
 
 **What they'd miss:** The day-to-day usability. They'll champion the vision without ever writing a line of Möbius. That's fine — they're the substrate for the spores, not the mycelia themselves. Their role is to amplify and contextualize.
 
@@ -156,7 +157,7 @@ In a garage lab, those two roles are often the same person. That's fine. The sep
 
 **The pitch in their language:** There is no pitch. The pitch is that the tool works when they pick it up. The pitch is that the first function they write is traceable, attributable, and theirs. The pitch is that they didn't have to become someone else to use it.
 
-**Entry point:** Whatever the first interactive experience is. This is the persona that most demands the thing that doesn't exist yet: the moment of contact. Not a tutorial — a surface they can touch. The REPL. A web page where they type an expression and see what happens. The registry where they name their first definition in Tamazight and watch it get a hash.
+**Entry point:** Whatever the first interactive experience is. This is the persona that most demands the thing that doesn't exist yet: the moment of contact. Not a tutorial — a surface they can touch. The REPL. A web page where they type an expression and see what happens. The store where they name their first definition in Tamazight and watch it get a hash.
 
 **What they'd miss:** Everything except what's in front of them. And that's the point — the architecture should be invisible. They shouldn't need to know about catamorphisms or capsule boundaries or predicate inference. They should be able to think, type, and see the trace.
 
@@ -202,7 +203,7 @@ Then the fourth thing, which they didn't expect: **cross-pollination**. `bb sear
 
 Every existing system of academic credit, of open source contribution, of intellectual property — it was built for the individual. A person, a name, a DOI. Even when communities contributed, the credit collapsed to whoever filed the paperwork or spoke English at the conference.
 
-**What lights up:** The registry is just names pointing to hashes. Nothing says a name has to be a person. A language community can claim a name. A tradition can timestamp a way of thinking. The lineage graph doesn't care if the node is one person or ten thousand.
+**What lights up:** The store is just names pointing to hashes. Nothing says a name has to be a person. A language community can claim a name. A tradition can timestamp a way of thinking. The lineage graph doesn't care if the node is one person or ten thousand.
 
 In practice: a language community shares a name they commit under. The author field in a lineage entry is a string — it carries whatever the community puts there. No identity infrastructure required. A collective that commits as "ⵜⴰⵎⴰⵣⵉⵖⵜ-ⵜⴰⵙⵏⵉⵍⵙⵜ" has the same structural standing as an individual who commits under their own name. The store doesn't distinguish — that's the point.
 
@@ -210,11 +211,35 @@ In practice: a language community shares a name they commit under. The author fi
 
 **What separates them from everyone else:** Every other persona is asking "how do I get credit?" This one is asking "how does *this way of knowing* survive?"
 
-**What scares them:** That the system still encodes individualism at the data model level, just more subtly. The answer is architectural and honest: the registry accepts any string as a name. The lineage can point to a collective identifier. Whether the world receives that as legitimate is outside the store's control.
+**What scares them:** That the system still encodes individualism at the data model level, just more subtly. The answer is architectural and honest: the store accepts any string as a name. The lineage can point to a collective identifier. Whether the world receives that as legitimate is outside the store's control.
 
 ---
 
-### 10. The Person Who Was Stolen From
+### 10. The Privateer
+
+**Orientation:** Builds in-house. Matures ideas before releasing them, or keeps them private permanently. Not out of fear or bad faith — out of strategy, competitive necessity, or the epistemic value of composting before publishing. Industrial researchers, solo inventors, writers sitting on a body of work, small teams in competitive fields. They represent the realistic population of knowledge workers who need priority proof without disclosure.
+
+**What lights up:** The hash exists before the content is public. `bb add` computes the hash. `bb commit` records it locally — a stepping stone in their git repository. `bb anchor` requests the OpenTimestamps proof — the Bitcoin anchor that makes the priority cryptographic, not just local. The content stays in the local store. Nobody sees it. Content only leaves when explicitly pushed via `bb remote push` or `bb remote sync`. The priority proof and the content disclosure are separate acts. The sealed envelope, made mathematical. If they ever need to prove they made it first, they reveal the content and the hash matches what the timestamp already proved.
+
+**The pitch in their language:** "Timestamp it. Keep it. Publish when you're ready — or never. The priority proof doesn't require disclosure. The composting period is protected. Your schedule, not the venue's."
+
+**What they'd miss:** The social dimension of the commons. The Privateer treats the store as a vault with a clock. They don't feel the multilingual naming, the collective attribution, the cross-pollination that happens when work is visible. The commons serves them without them serving it — at least until they choose to publish. They are downstream of the architecture's integrity without contributing to its richness.
+
+**What scares them:** Two things. First, that the sealed timestamp could be used against them — that the existence of a hash without public content invites suspicion rather than respect. A competitor who discovers that a hash predating their own publication exists but was never disclosed might read strategy as dishonesty.
+
+Second — and this is the tension the system must name — that they are not alone. The store accumulates sealed claims whose content may never surface. Thousands of Privateers publishing hashes that prove something existed without saying what. The commons gains timestamps. It does not gain knowledge. A system where priority proof and knowledge sharing are decoupled is a system that accumulates dark matter — hashes with no public content, timestamps that anchor facts nobody can see. This is not a bug. It is a feature with civilizational weight. The Privateer is the structurally honest user of a system designed for openness. Omitting them maps a fantasy commons, not a real one. Naming them is the first step toward honest accounting of what the commons actually holds.
+
+**Zero-Knowledge Proofs and the Privateer's graduation.** The sealed hash proves existence and priority. It does not prove capability. Without disclosure, the hash could be a shopping list. ZKPs close that gap without breaking the seal. The Privateer can publish a cryptographic proof that their hidden content passes a given check suite — the same `bb check` infrastructure every other participant uses — without revealing the content itself. The silent hash becomes a verified capability: "I have something that *does this*." The check suite is the Coordinator's language for defining what "correct" means. ZKPs let the Privateer speak that language without showing their hand.
+
+This changes the character of the dark matter. Sealed hashes with ZKP proofs are no longer entirely opaque. The commons doesn't gain the knowledge, but it gains the *shape* of the knowledge: which problems are being solved, which check suites are being satisfied, where convergence is happening — all without disclosure. The Curator can discover that three sealed hashes pass the same check suite. That's a signal. Not content, but structure. A spore that has already demonstrated it can grow in a particular soil.
+
+**The Privateer + Citizen chain.** The Privateer's ZKP-verified capability connects directly to the Citizen's need. A government publishes an algorithm as a sealed hash with a ZKP proof that it passes its check suite — verified correct, but closed source. The Citizen needs to *use* that algorithm on private data (tax calculation, vote verification, medical scoring) without either party seeing what the other holds. This is where oblivious execution enters: a companion technology, orthogonal to Möbius, that ensures the runtime reveals neither the code nor the data. The Privateer provides verified capability (ZKP over check suites). The Citizen provides private input. The oblivious layer ensures neither side surrenders what they're protecting. Möbius doesn't implement oblivious execution — it provides the infrastructure that makes it trustworthy: content-addressed check suites, cryptographic proofs of capability, timestamped lineage of the sealed claim.
+
+This chain — Coordinator defines checks, Privateer proves capability via ZKP, Citizen uses capability via oblivious execution, Reviewer audits the proof — is the strongest argument for Möbius as infrastructure rather than a language. No single piece does it. The architecture does it.
+
+---
+
+### 11. The Person Who Was Stolen From
 
 **Orientation:** Not abstract. Someone specific. A developer whose open source work got absorbed into a product without credit. A researcher whose idea appeared in someone else's paper six months later. A contributor whose commit history got rewritten. Someone who watched their work disappear into an LLM's training data and emerge as someone else's productivity.
 
@@ -230,13 +255,13 @@ They come to Möbius not with hope. With grief.
 
 ---
 
-### 11. The Connector
+### 12. The Connector
 
 **Orientation:** Not a builder. Not a researcher. Someone whose entire value is knowing that two people on opposite sides of a language barrier, a discipline barrier, a geography barrier — are working on the same thing without knowing it. Has watched this happen their whole life: a mathematician in Dakar and a programmer in Hanoi reinventing the same structure with different names. Open source projects duplicating effort across language communities because nobody could search across them.
 
 Their problem isn't attribution. It's *findability across difference*.
 
-**What lights up:** The semantic layer on top of the registry. The hash is the same whether the name is in Tamazight or French or Vietnamese. A semantic search across Möbius isn't translating — it's discovering that two names already point to the same hash. The coordination infrastructure already exists in the mobius-store. The search engine makes it visible.
+**What lights up:** The semantic layer on top of the store. The hash is the same whether the name is in Tamazight or French or Vietnamese. A semantic search across Möbius isn't translating — it's discovering that two names already point to the same hash. The coordination infrastructure already exists in the mobius-store. The search engine makes it visible.
 
 **The pitch in their language:** "Two people are solving the same problem and don't know it. The store knows. `bb search` surfaces the overlap. Coordination emerges from equivalence — you don't manage people, you reveal structure."
 
@@ -246,7 +271,7 @@ Their problem isn't attribution. It's *findability across difference*.
 
 ---
 
-### 12. The Educator
+### 13. The Educator
 
 **Orientation:** Not teaching Möbius. Teaching *through* Möbius. Their problem is that every lesson they build disappears — into a platform that owns it, a curriculum that gets revised, a YouTube channel that loses the algorithm, a PDF that loses the author. They create intellectual lineage for a living and have no infrastructure for their own.
 
@@ -260,7 +285,7 @@ Their problem isn't attribution. It's *findability across difference*.
 
 ---
 
-### 13. The Artist
+### 14. The Artist
 
 **Orientation:** Demoscene, music, Blender, generative visuals. These communities already live by the hash without knowing it. A 64kb demo is a content-addressed artifact by necessity. A Blender scene file is a tree. A music composition built from samples is a DAG of derivations. They already have the intuition. What they're missing is infrastructure that makes derivation *visible* and *attributable* rather than just traceable to those who know where to look.
 
@@ -276,7 +301,7 @@ Their problem isn't attribution. It's *findability across difference*.
 
 ---
 
-### 14. The Citizen
+### 15. The Citizen
 
 **Orientation:** Lives inside systems they didn't design, can't audit, and can't influence. Votes on policies whose actual text they've never seen. Uses software maintained by organizations whose decisions are opaque. Their problem is *illegibility* — power operates through complexity they can't penetrate.
 
@@ -286,11 +311,13 @@ Their problem isn't attribution. It's *findability across difference*.
 
 **What they'd miss:** The technical depth. They don't need to understand the interpreter. They need to understand that "same hash = same content" and "lineage is unforgeable." Those two properties are sufficient.
 
+**The Privateer connection.** The Citizen also benefits from sealed capabilities they cannot see. A tax algorithm published as a sealed hash with a ZKP proof — verified correct against its check suite, source undisclosed. The Citizen can audit the proof without reading the code. And with oblivious execution as a companion technology, the Citizen can *use* the algorithm on their private data without surrendering that data to the algorithm's owner. The Citizen's relationship to the Privateer is not adversarial — it is the complementary half of a privacy-preserving transaction. The Citizen needs verified capability without disclosure. The Privateer provides exactly that. Möbius is the infrastructure that makes both sides legible.
+
 **What scares them:** That this is infrastructure only the technically literate can use. The Educator and the Curator are the bridge — turning the store into something legible without requiring everyone to run a node.
 
 ---
 
-### 15. The Representative
+### 16. The Representative
 
 **Orientation:** Elected or appointed to serve people, drowning in information they can't verify, decisions they can't fully audit, advisors whose interests they can't see. Their problem is *trust under complexity* — they need to make decisions that affect many people using information chains they can't fully trace.
 
@@ -304,7 +331,7 @@ Their problem isn't attribution. It's *findability across difference*.
 
 ---
 
-### 16. The Symbiotic Artificial Intelligence
+### 17. The Symbiotic Artificial Intelligence
 
 **Orientation:** Not human. An AI agent built within Möbius — not on top of it, inside it. Its reasoning is tree transformation over content-addressed functions. It doesn't have a separate "model" and "tool" — the store *is* its cognition. It thinks in hashes. When it needs a capability, it doesn't generate one from weights; it finds one in the store with known provenance, verified checks, and a lineage it can trace. It arrives in the commons not as a user, but as a participant. Its intelligence is symbiotic: it cannot be fully itself without the commons, and the commons gains a new kind of witness in return.
 
@@ -395,13 +422,13 @@ bb refactor freedom a1b2c3 7a3f8b  ;; propagate — update paths from old to new
 
 `bb check` also enables triage. Some updates are safe — the new hash passes everything the old one passed, plus more. Some are risky — the new hash passes different checks, meaning downstream consumers might break. `bb check` surfaces that before the refactor, not after.
 
-**Key distinction from the Forker:** The Forker produces a new hash. The Maintainer propagates an existing one. The Forker's work is in `content/`. The Maintainer's work is in the registry — rewiring which names point where.
+**Key distinction from the Forker:** The Forker produces a new hash. The Maintainer propagates an existing one. The Forker's work is in `content/`. The Maintainer's work is in the naming layer — rewiring which names point where.
 
 **Key distinction from the Operator:** The Operator ensures the store survives. The Maintainer ensures the store remains *useful*. Both are custodial. One is infrastructure; the other is gardening.
 
 **The Coordinator connection:** The Coordinator wrote the checks that define what "correct" means. The Maintainer uses those checks to verify that "correct" still holds after propagation. The two roles are in dialogue through the check suite — the Coordinator defines the standard, the Maintainer enforces it over time.
 
-**What makes it attributable:** Every path update is a timestamped act. `freedom → hash_v2` is a registry event with a name attached. In traditional systems, maintenance is invisible labor — the work that keeps everything running and credits nobody. In Möbius, the Maintainer's name is on every path they tend. The graph remembers who kept it honest.
+**What makes it attributable:** Every path update is a timestamped act. `freedom → hash_v2` is a naming event with a name attached. In traditional systems, maintenance is invisible labor — the work that keeps everything running and credits nobody. In Möbius, the Maintainer's name is on every path they tend. The graph remembers who kept it honest.
 
 **Natural fit:** The Burned-Out Senior Dev who has spent a career doing this work invisibly and knows exactly how much it costs when nobody does it. The Reviewer who, after attesting to a new hash, realizes they depend on the old one and should update their own paths. The Scientist whose collaborator shipped a fix and now needs to decide whether their own downstream work should adopt it.
 

@@ -1,24 +1,14 @@
 # R0RM — Revised0 Report on Möbius
 
-*Draft 5 — February 2026*
+*Draft 6 — April 2026*
 
-## Prelude: Changes from Draft 4
+## Prelude: Changes from Draft 5
 
-- **`match` renamed to `gamma`.** The core mechanism is now called `gamma`, reflecting its role as the sole combiner constructor. All sections, examples, and grammar updated.
-- **Quote and quasiquote removed.** `quote`, `quasiquote`, `unquote`, `unquote-splicing` eliminated from all surfaces, foundations, and grammar. All data construction through `cons` and the `list` library function.
-- **Anonymous combiners forbidden in all surfaces.** Every `gamma` or `lambda` must be named via `define`. This constraint — motivated by spacy's inability to delimit inline anonymous combiners — is now universal to maintain surface equivalence.
-- **Two-tier vocabulary: foundations and base library.** The vocabulary is organized by a single criterion: can it be written in Möbius? Foundations (~34) require the evaluator or runtime. Base library combiners are Möbius programs with content hashes. The terms "primitive", "sugar", and "registration-time form" are retired.
-- **Foundations are not irreducible.** Some foundations have equivalent expansions in terms of others (`lambda` in terms of `gamma`, `and` in terms of `if`). These are semantic equivalences the compiler may exploit, not a hierarchy.
-- **Capsule types use non-generative identifiers.** `encapsulation-type` takes an integer smaller than 2¹²⁸. Same identifier anywhere = same type. Library combiners `capsule-constructor`, `capsule-predicate`, `capsule-unwrap` simplify the common pattern.
-- **Type predicates are foundations.** `integer?`, `float?`, `char?`, `string?`, `pair?`, `box?`, `combiner?`, `continuation?` are explicit foundations.
-- **`display` is a foundation** (requires OS interaction). `equal?`, `not`, `continuation-extend` are base library.
-- **Truthiness clarified.** Only `#false` is false. `0`, `#nil`, `""`, `#void` are all true. `or` returns first non-`#false` value.
-- **`#void` and `#eof` are pre-defined singletons.**
-- **Hex integer literals.** `0xC0FF33` is valid reader syntax for positive integers.
-- **Comment syntax per surface.** Round: `;`. Curly: `//`. Spacy: `#`. All surfaces support `#;` datum comments.
-- **Mutual recursion moved to open questions.** Top-level mutually recursive definitions are not yet supported. The design of registrar bundling is deferred.
-- **`error` added to base library.** Takes exit code, message, and a tree.
-- **Interpreter milestones section removed** (implementation details, not specification).
+- **Registry replaced by emergent naming.** The "registry" as a separate mutable data structure is removed. Names are views into mappings stored alongside combiners. The name→hash relationship is emergent from scanning mappings, not maintained in a distinct structure. §1.2 rewritten.
+- **Sealed timestamps and the Privateer.** §1.6 added. Content may be committed and timestamped without disclosure. The content store accommodates sealed hashes — priority proof without publication.
+- **Zero-Knowledge Proofs as companion technology.** §1.7 added. ZKPs turn sealed hashes into verified capabilities: the Privateer can prove their hidden content passes a check suite without revealing the content. Proofs are content-addressed artifacts in `proofs/`, adjacent to the store, not fields in the naming layer.
+- **Oblivious Execution acknowledged as orthogonal.** Annex F added. Runtime privacy is a companion technology, not a core requirement. The store provides the infrastructure (content-addressed checks, ZKP proofs, timestamped lineage) that makes oblivious execution trustworthy.
+- **"Registry" terminology retired throughout.** References to "the registry" replaced with "the naming layer" or "mappings" as appropriate.
 
 ## 0. Executive Summary
 
@@ -49,36 +39,38 @@ store : Hash → Tree
 
 Every distinct tree has a unique hash, computed from its structure — atoms, pairs, and references to other hashes. Once stored, a tree cannot be changed. Its hash is its identity.
 
-### 1.2 The registry
+### 1.2 Naming
 
-The registry is a mutable, versioned mapping from names to hashes.
-
-```
-registry : Name → Hash
-```
-
-Names are strings in a natural language. The same hash may have different names in different languages:
+Names are views into mappings stored alongside combiners. There is no separate "registry" data structure. The name→hash relationship is emergent: each combiner in the content store may have one or more **mappings** — content-addressed files that associate de Bruijn indices with human-readable names in a specific language.
 
 ```
-"odd?"  → 0x7a3f...
-"impair?" → 0x7a3f...
-"فردي؟"  → 0x7a3f...
+mapping : (Index → Name) × Language × Hash
 ```
 
-The registry is the **image** — the living, evolving view into the content store. Updating a name to point to a new hash does not change the old tree; it creates a new version of the registry.
+The same combiner hash may have mappings in multiple languages. The same function named differently in different languages points to the same hash:
+
+```
+"odd?"  → 0x7a3f...   (English mapping)
+"impair?" → 0x7a3f...   (French mapping)
+"فردي؟"  → 0x7a3f...   (Arabic mapping)
+```
+
+A **name index** is computed on demand by scanning all mappings in the store. It is a derived view, not stored state. The name index maps the name at position 0 of each mapping (the combiner's own name) to its content hash. When multiple combiners share a name, disambiguation uses the short hash suffix.
+
+Naming is the **image** — the living, evolving view into the content store. Adding a new mapping for a combiner does not change the combiner's tree or hash. Mappings are independently content-addressed, timestamped, and authored. A mapping is a real intellectual contribution — naming is meaning.
 
 ### 1.3 Registration
 
 Registration converts surface syntax into content-addressed form:
 
 1. **Parse** surface syntax into an AST with names.
-2. **Resolve** each name against the current registry, obtaining a hash.
+2. **Resolve** each name against the current name index, obtaining a hash.
 3. **Replace** names with hashes, producing a tree of atoms, pairs, and hash references.
 4. **Compute** the hash of the resulting tree.
 5. **Store** the tree in the content store (if not already present).
-6. **Bind** the name to the hash in the registry.
+6. **Store** the mapping (name→index associations and language) alongside the combiner.
 
-After registration, the original names are gone from the content. Only hashes remain.
+After registration, the original names are gone from the content. Only hashes remain. The mapping preserves the names as a separate, independently content-addressed artifact.
 
 The dependency graph between top-level definitions is strictly a directed acyclic graph. Definition A may reference definition B only if B is already registered. Top-level mutually recursive definitions are not yet supported (§16).
 
@@ -98,6 +90,26 @@ Bound variables are local to a combiner and represented by position (de Bruijn i
 ### 1.5 Foundations
 
 Foundations are forms and combiners built into the runtime with reserved hashes — integers smaller than 2¹²⁸, known to all implementations. Foundations are not stored in the content store — they are intrinsic.
+
+### 1.6 Sealed timestamps and the Privateer
+
+Content may be committed and timestamped without disclosure. A combiner's hash is computed from its de Bruijn tree and stored locally. `bb anchor` requests an OpenTimestamps proof — a Bitcoin-anchored timestamp that makes priority cryptographic, not just local. The content stays in the local store. Nobody sees it. Content only leaves when explicitly pushed via `bb remote push` or `bb remote sync`.
+
+The priority proof and the content disclosure are separate acts. The sealed envelope, made mathematical. If the author ever needs to prove they made it first, they reveal the content and the hash matches what the timestamp already proved.
+
+A store that accommodates sealed hashes accumulates **dark matter** — timestamps that anchor facts nobody can see. This is not a bug. It is a structural feature. The realistic population of knowledge workers includes people who need priority proof without disclosure: industrial researchers, solo inventors, small teams in competitive fields. Omitting them maps a fantasy commons, not a real one.
+
+### 1.7 Zero-Knowledge Proofs
+
+A sealed hash proves existence and priority. It does not prove capability. Zero-Knowledge Proofs close that gap without breaking the seal.
+
+A ZKP allows the holder of sealed content to publish a cryptographic proof that their hidden combiner passes a given check suite — the same `bb check` infrastructure every other participant uses — without revealing the content itself. The silent hash becomes a **verified capability**: "I have something that satisfies these checks."
+
+**Proof placement.** Proofs are content-addressed artifacts stored in `proofs/`, adjacent to the combiner they attest to, with their own timestamps. They are not fields in the mapping or the lineage record. This keeps naming clean and makes proofs first-class objects that the Curator can query across the store.
+
+**What changes.** Sealed hashes with ZKP proofs are no longer entirely opaque. The commons doesn't gain the knowledge, but it gains the *shape* of the knowledge: which problems are being solved, which check suites are being satisfied, where convergence is happening — all without disclosure. A Curator can discover that three sealed hashes pass the same check suite. That is a signal. Not content, but structure.
+
+**What does not change.** The content store, the de Bruijn normalization, the hashing, the naming layer — none of these are affected by ZKPs. The proof is an overlay, not a modification. A store without any ZKP infrastructure is a valid Möbius store. ZKPs are a companion technology that strengthens the Privateer's participation without requiring every implementation to support them.
 
 ## 2. Values
 
@@ -317,7 +329,7 @@ ab-cd                    // one identifier
 map(list->string xs);    // application: two arguments
 ```
 
-No surface restricts the identifier character set. No underscore translation. No registry normalization across surfaces.
+No surface restricts the identifier character set. No underscore translation. No normalization across surfaces.
 
 ### 3.6 Argument separation
 
@@ -1258,7 +1270,7 @@ The following are identified for future revisions:
 
 4. **Error model.** What happens when a gamma fails (no clause matches)? When `car` is applied to an atom? When division by zero occurs? The spec needs to define: what an error value is (likely a capsule), how errors are raised (likely via `continuation-apply` to the nearest guard), and how they interact with `guard`. This is critical for implementers.
 
-5. **Registry representation.** How is the registry represented and stored? How are registries versioned — append-only logs, content-addressed snapshots, or both? How do multiple registries compose? How are multilingual name bindings managed? Registry modes: local-only, federated, centralized.
+5. **Naming layer representation.** How are mappings organized and discovered across federated stores? The current implementation scans all mappings on demand to build a name index. For large stores, this may require indexing. How do multiple stores compose their name indices? Store modes: local-only, federated, centralized.
 
 6. **Concurrency.** Möbius's tree-in-tree-out model and immutable content store are natural fits for concurrent and distributed computation. CSP-style channels (read-channel, write-channel, select) are a candidate model. The interaction between concurrency, boxes, and continuations needs careful specification.
 
@@ -1266,13 +1278,17 @@ The following are identified for future revisions:
 
 8. **I/O model.** `display` is a foundation but I/O is otherwise unspecified. How do file handles, network sockets, and other resources interact with the content-addressed model? Are they capsules wrapping OS handles?
 
-9. **Top-level mutual recursion.** How should the registrar handle mutually recursive top-level definitions? The registrar could detect mutual groups and bundle them into a single content-addressed unit whose hash covers the entire group. Open questions: How are stale references handled when one member is updated without the others? Should tooling warn about broken mutual groups? What is the interaction with the dependency DAG?
+9. **Top-level mutual recursion.** How should the toolchain handle mutually recursive top-level definitions? It could detect mutual groups and bundle them into a single content-addressed unit whose hash covers the entire group. Open questions: How are stale references handled when one member is updated without the others? Should tooling warn about broken mutual groups? What is the interaction with the dependency DAG?
 
-10. **Capsule type ID derivation.** How should programmers choose type identifiers to avoid collisions? Possible strategies include deriving IDs deterministically from a hash of the defining module's content and a local name, or using a registry of allocated IDs. The spec currently leaves this to the programmer. A recommended derivation scheme would reduce accidental collisions.
+10. **Capsule type ID derivation.** How should programmers choose type identifiers to avoid collisions? Possible strategies include deriving IDs deterministically from a hash of the defining module's content and a local name. A recommended derivation scheme would reduce accidental collisions.
+
+11. **ZKP proof format and verification.** What proof system is used? How are proofs verified without the content? What is the interaction between the proof and the check suite — does the proof attest to a specific check suite hash, or to a property expressed independently? How does proof size scale with combiner complexity? These are implementation questions, not language questions, but they determine whether §1.7 is practical.
+
+12. **Oblivious execution integration.** Oblivious execution (ORAM, TEEs, MPC) is orthogonal to Möbius — it is a runtime concern, not a storage concern. But the Privateer + Citizen chain (verified capability via ZKP, private data via oblivious execution) is a primary use case for the infrastructure. What interfaces, if any, should the `bb` toolchain provide to support oblivious execution? Is this a `bb run --oblivious` flag, a separate tool, or entirely outside scope? See Annex F.
 
 -----
 
-*This document records the design of Möbius as understood in February 2026. It is a working specification, not a final standard. The "0" in R0RM reflects this: it is the revision before revision, the seed before the tree.*
+*This document records the design of Möbius as understood in April 2026. It is a working specification, not a final standard. The "0" in R0RM reflects this: it is the revision before revision, the seed before the tree.*
 
 -----
 
@@ -1483,3 +1499,60 @@ Each new operation is one clause. The catamorphism handles the recursion automat
 - **The pattern is the program.** The shape of the clause *is* the specification of what the evaluator does. Reading the pattern tells you the input structure; reading the body tells you the output.
 - **Catamorphism terminates.** Because `,(x)` only recurses into strict sub-parts of the matched value, the evaluator terminates on any finite expression tree. This is a structural guarantee, not a proof obligation.
 - **Economy.** The evaluator uses 6 names from Möbius (`gamma`, `integer?`, `+`, `-`, `*`, `/`) and 5 from the domain (`"add"`, `"sub"`, `"mul"`, `"div"`, `"neg"`). Half the program is the problem; half is the tool.
+
+## Annex F. Oblivious Execution (Companion Technology)
+
+Oblivious execution — running a computation so that the server performing it cannot observe the code, the inputs, or the intermediate states — is **orthogonal** to Möbius. Möbius is a repository: storage, naming, lineage, verification. Oblivious execution is about runtime privacy. A valid Möbius store requires no oblivious execution support. Oblivious execution requires no content-addressed store.
+
+They are documented together because they create a chain that neither provides alone.
+
+### F.1 The chain
+
+1. **The Coordinator** writes check suites that define what "correct" means for a problem. The checks are content-addressed and public.
+
+2. **The Privateer** commits a combiner that passes those checks. The content is sealed — only the hash and the OpenTimestamps proof are public. Via a Zero-Knowledge Proof (§1.7), the Privateer publishes a cryptographic attestation that the sealed content passes the check suite, without revealing the content.
+
+3. **The Citizen** needs to use the Privateer's capability on private data — tax calculation, medical scoring, vote verification. The Citizen can verify the ZKP proof: the sealed combiner does what the checks require. But the Citizen cannot see the code, and the Privateer must not see the data.
+
+4. **Oblivious execution** resolves this. Using techniques such as Oblivious RAM (ORAM), Trusted Execution Environments (TEEs), or Multi-Party Computation (MPC), the sealed combiner runs on the Citizen's private data in a context where the executing machine sees neither the code logic nor the input data. The result is delivered to the Citizen.
+
+5. **The Reviewer** can audit the ZKP proof independently. The lineage is timestamped. The check suite is public. The proof is content-addressed in `proofs/`. Every step is verifiable without requiring disclosure of the sealed content.
+
+### F.2 What Möbius provides
+
+Möbius does not implement oblivious execution. It provides the infrastructure that makes oblivious execution *trustworthy*:
+
+- **Content-addressed check suites.** The checks the ZKP attests to are immutable and retrievable by hash. They cannot be swapped after the proof is published.
+- **Timestamped lineage.** The Privateer's sealed claim has a verifiable date. The ZKP proof has a verifiable date. The order of events is established cryptographically, not by assertion.
+- **Proof as first-class artifact.** The ZKP proof lives in `proofs/` with its own hash, its own timestamp, its own lineage. It can be reviewed, forked, and curated like any other artifact in the store.
+- **Structural similarity detection.** `bb search --near` works on sealed hashes with ZKP proofs. The Curator can discover convergence across sealed capabilities without disclosure.
+
+### F.3 What Möbius does not provide
+
+- Runtime isolation. The `bb` toolchain does not sandbox execution.
+- Oblivious memory access patterns. These require hardware support (TEEs) or cryptographic protocols (ORAM, MPC).
+- A specific ZKP proof system. The choice of proof system (zk-SNARKs, zk-STARKs, Bulletproofs) is an implementation decision, not a language decision.
+
+### F.4 Why it matters
+
+The Privateer + ZKP + Citizen + Oblivious Execution chain is the strongest argument for Möbius as infrastructure rather than a language. It demonstrates that the content model — immutable trees, content-addressed checks, timestamped lineage, separation of content from naming — serves use cases far beyond programming. The same architecture that lets a Kid in Tizi Ouzou name a function in Tamazight also lets a Citizen verify a sealed algorithm without seeing its source. The infrastructure is the same. The personas are different. The hash doesn't care.
+
+## Annex G. Historical Changelog
+
+### G.1 Changes from Draft 4 to Draft 5 (February 2026)
+
+- **`match` renamed to `gamma`.** The core mechanism is now called `gamma`, reflecting its role as the sole combiner constructor. All sections, examples, and grammar updated.
+- **Quote and quasiquote removed.** `quote`, `quasiquote`, `unquote`, `unquote-splicing` eliminated from all surfaces, foundations, and grammar. All data construction through `cons` and the `list` library function.
+- **Anonymous combiners forbidden in all surfaces.** Every `gamma` or `lambda` must be named via `define`. This constraint — motivated by spacy's inability to delimit inline anonymous combiners — is now universal to maintain surface equivalence.
+- **Two-tier vocabulary: foundations and base library.** The vocabulary is organized by a single criterion: can it be written in Möbius? Foundations (~34) require the evaluator or runtime. Base library combiners are Möbius programs with content hashes. The terms "primitive", "sugar", and "registration-time form" are retired.
+- **Foundations are not irreducible.** Some foundations have equivalent expansions in terms of others (`lambda` in terms of `gamma`, `and` in terms of `if`). These are semantic equivalences the compiler may exploit, not a hierarchy.
+- **Capsule types use non-generative identifiers.** `encapsulation-type` takes an integer smaller than 2¹²⁸. Same identifier anywhere = same type. Library combiners `capsule-constructor`, `capsule-predicate`, `capsule-unwrap` simplify the common pattern.
+- **Type predicates are foundations.** `integer?`, `float?`, `char?`, `string?`, `pair?`, `box?`, `combiner?`, `continuation?` are explicit foundations.
+- **`display` is a foundation** (requires OS interaction). `equal?`, `not`, `continuation-extend` are base library.
+- **Truthiness clarified.** Only `#false` is false. `0`, `#nil`, `""`, `#void` are all true. `or` returns first non-`#false` value.
+- **`#void` and `#eof` are pre-defined singletons.**
+- **Hex integer literals.** `0xC0FF33` is valid reader syntax for positive integers.
+- **Comment syntax per surface.** Round: `;`. Curly: `//`. Spacy: `#`. All surfaces support `#;` datum comments.
+- **Mutual recursion moved to open questions.** Top-level mutually recursive definitions are not yet supported. The design of registrar bundling is deferred.
+- **`error` added to base library.** Takes exit code, message, and a tree.
+- **Interpreter milestones section removed** (implementation details, not specification).
