@@ -19,7 +19,10 @@ manual.epub: manual.md
 	pandoc -o $@ $< && echo "✓ Generated manual.epub"
 
 manual.pdf: manual.md
-	pandoc --pdf-engine=xelatex -o $@ $< && echo "✓ Generated manual.pdf"
+	pandoc --pdf-engine=xelatex \
+		-V mainfont="DejaVu Sans" \
+		-V monofont="DejaVu Sans Mono" \
+		-o $@ $< && echo "✓ Generated manual.pdf"
 
 clean:
 	rm -f manual.md manual.html manual.epub manual.pdf
